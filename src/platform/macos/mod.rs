@@ -44,25 +44,6 @@ impl MouseControl for MacPlatform {
   ) -> Result<InputResult> {
     mouse::click(handle, x, y, button, double_click)
   }
-  fn click_by_xpath(
-    &self,
-    handle: &WindowHandle,
-    xpath: &str,
-    button: MouseButton,
-    double_click: bool,
-  ) -> Result<InputResult> {
-    let elem = elements::find_first_element_by_xpath(handle, xpath)?;
-    let pos = elem.pos(Some(handle))?;
-    // Activate window first, then click at screen coords (same as Windows)
-    window::focus_window(handle)?;
-    std::thread::sleep(std::time::Duration::from_millis(100));
-    let wins = crate::platform::macos::window::list_windows()?;
-    let win = wins.iter().find(|w| w.hwnd == handle.0);
-    let rel_x = pos.center_x - win.map(|w| w.x).unwrap_or(0);
-    let rel_y = pos.center_y - win.map(|w| w.y).unwrap_or(0);
-    mouse::click(handle, rel_x as f64, rel_y as f64, button, double_click)?;
-    Ok(InputResult::success(pos.center_x, pos.center_y, rel_x, rel_y))
-  }
   fn drag(
     &self,
     handle: &WindowHandle,
@@ -81,39 +62,18 @@ impl MouseControl for MacPlatform {
 
 // === KeyboardControl ===
 impl KeyboardControl for MacPlatform {
-  fn type_text(&self, handle: &WindowHandle, text: &str, position: Option<&InputPosition>) -> Result<InputResult> {
-    keyboard::type_text(handle, text, position)
-  }
-  fn type_text_by_xpath(&self, handle: &WindowHandle, xpath: &str, text: &str) -> Result<InputResult> {
-    let elem = elements::find_first_element_by_xpath(handle, xpath)?;
-    let pos = elem.pos(Some(handle))?;
-    // Try AX set_value first (same as Windows)
-    if elem.can_set_value().unwrap_or(false) && elem.set_value(text) {
-      return Ok(InputResult::success(pos.center_x, pos.center_y, 0, 0));
-    }
-    // Fallback: activate window, click element, type via CGEvent (same pattern as Windows)
-    window::focus_window(handle)?;
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    let wins = crate::platform::macos::window::list_windows()?;
-    let win = wins.iter().find(|w| w.hwnd == handle.0);
-    let rel_x = pos.center_x - win.map(|w| w.x).unwrap_or(0);
-    let rel_y = pos.center_y - win.map(|w| w.y).unwrap_or(0);
-    mouse::click(handle, rel_x as f64, rel_y as f64, crate::types::MouseButton::Left, false)?;
-    std::thread::sleep(std::time::Duration::from_millis(100));
-    keyboard::type_text(handle, text, None)?;
-    Ok(InputResult::success(pos.center_x, pos.center_y, 0, 0))
-  }
-  fn type_text_raw(&self, handle: &WindowHandle, text: &str) -> Result<()> {
-    keyboard::type_text_raw(handle, text)
+  fn type_text(
+    &self,
+    _scope: ElementScope,
+    _text: &str,
+    _position: Option<(f64, f64)>,
+    _enter: bool,
+    _clear: bool,
+  ) -> Result<()> {
+    todo!("macos: type_text")
   }
   fn send_keys(&self, keys: &[KeyCode], modifiers: Option<&[KeyCode]>) -> Result<()> {
     keyboard::send_keys(keys, modifiers)
-  }
-  fn send_keys_to_window(&self, handle: &WindowHandle, keys: &[KeyCode], modifiers: Option<&[KeyCode]>) -> Result<()> {
-    let wins = crate::platform::macos::window::list_windows()?;
-    let win = wins.iter().find(|w| w.hwnd == handle.0)
-      .ok_or_else(|| anyhow::anyhow!("window not found: {}", handle.0))?;
-    keyboard::send_keys_to_pid(win.process_id as i32, keys, modifiers)
   }
   fn key_down(&self, key: KeyCode) -> Result<()> {
     keyboard::key_down(key)
@@ -134,30 +94,17 @@ impl WindowManager for MacPlatform {
   fn find_windows_by_title(&self, pattern: &str, process_name: Option<&str>) -> Result<Vec<WindowInfo>> {
     window::find_windows_by_title(pattern, process_name)
   }
-  fn find_window_by_title(&self, title: &str) -> Result<WindowHandle> {
-    window::find_window_by_title(title)
+  fn find_windows_by_process(&self, pattern: &str) -> Result<Vec<WindowInfo>> {
+    let pat = pattern.to_lowercase();
+    Ok(
+      window::list_windows()?
+        .into_iter()
+        .filter(|w| w.process_name.to_lowercase().contains(&pat))
+        .collect(),
+    )
   }
   fn get_windows_by_process_id(&self, pid: u32) -> Result<Vec<WindowInfo>> {
     window::get_windows_by_process_id(pid)
-  }
-  fn get_windows_by_process_id_with_title(&self, pid: u32, pattern: &str, fuzzy: bool) -> Result<Vec<WindowInfo>> {
-    window::get_windows_by_process_id_with_title(pid, pattern, fuzzy)
-  }
-  fn get_child_windows(&self, parent: &WindowHandle) -> Result<Vec<WindowInfo>> {
-    // Get child windows by finding the parent's PID and filtering windows
-    let wins = window::list_windows()?;
-    if let Some(parent_win) = wins.iter().find(|w| w.hwnd == parent.0) {
-      let pid = parent_win.process_id;
-      // Return all windows of the same process except the parent
-      Ok(
-        wins
-          .into_iter()
-          .filter(|w| w.process_id == pid && w.hwnd != parent.0)
-          .collect(),
-      )
-    } else {
-      Ok(Vec::new())
-    }
   }
   fn get_window_title(&self, handle: &WindowHandle) -> Result<String> {
     window::get_window_title(handle)
@@ -190,11 +137,14 @@ impl WindowManager for MacPlatform {
 
 // === ElementFinder ===
 impl ElementFinder for MacPlatform {
-  fn find_elements_by_xpath(&self, handle: &WindowHandle, xpath: &str) -> Result<Vec<Box<dyn Element>>> {
-    elements::find_elements_by_xpath(handle, xpath)
+  fn query_elements(&self, _scope: ElementScope, _q: &ElementQuery) -> Result<Vec<Box<dyn Element>>> {
+    todo!("macos: query_elements")
   }
-  fn find_first_element_by_xpath(&self, handle: &WindowHandle, xpath: &str) -> Result<Box<dyn Element>> {
-    elements::find_first_element_by_xpath(handle, xpath)
+  fn query_one(&self, _scope: ElementScope, _q: &ElementQuery) -> Result<Box<dyn Element>> {
+    todo!("macos: query_one")
+  }
+  fn find_by_xpath(&self, _scope: ElementScope, _xpath: &str) -> Result<Vec<Box<dyn Element>>> {
+    todo!("macos: find_by_xpath")
   }
 }
 
@@ -202,6 +152,12 @@ impl ElementFinder for MacPlatform {
 impl UiTreeInspector for MacPlatform {
   fn get_page_source(&self, handle: &WindowHandle) -> Result<String> {
     elements::get_page_source(handle)
+  }
+  fn get_page_source_verbose(&self, handle: &WindowHandle) -> Result<String> {
+    elements::get_page_source_verbose(handle)
+  }
+  fn probe_at_position(&self, x: i32, y: i32) -> Result<String> {
+    elements::probe_at_position(x, y)
   }
 }
 
@@ -219,6 +175,9 @@ impl ScreenCapture for MacPlatform {
 impl ProcessManager for MacPlatform {
   fn launch_app(&self, path: &str, wait_timeout_ms: u32) -> Result<u32> {
     process::launch_app(path, wait_timeout_ms)
+  }
+  fn launch_app_async(&self, _path_or_bundle: &str, _wait: bool) -> Result<u32> {
+    todo!("macos: launch_app_async")
   }
   fn terminate_app(&self, pid: u32) -> Result<bool> {
     process::terminate_app(pid)

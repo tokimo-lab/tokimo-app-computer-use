@@ -171,18 +171,27 @@ fn get_frontmost_pid() -> Result<u32> {
 }
 
 /// Activate an application by PID.
+/// Uses AXUIElement raise (kAXRaiseAction) first — same approach as AgentAccess.
+/// Falls back to NSRunningApplication.activateWithOptions: for docked apps.
 fn activate_app(pid: u32) -> Result<()> {
-  // NSRunningApplication::activateWithOptions is deprecated in macOS 14+ (no effect).
-  // Use `open -a` which reliably activates the app from CLI context.
-  let app_name = get_app_name_for_pid(pid)?;
-  let output = std::process::Command::new("open")
-    .args(["-a", &app_name])
-    .output()
-    .map_err(|e| anyhow::anyhow!("open -a failed: {e}"))?;
-  if !output.status.success() {
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    return Err(anyhow::anyhow!("open -a failed: {}", stderr));
+  use accessibility::action::AXUIElementActions;
+
+  // Step 1: AXUIElement raise — accessibility-based activation, works with CJK names.
+  // Reference: AgentAccess AccessibilityService.swift launchIfNeeded()
+  let app = accessibility::AXUIElement::application(pid as i32);
+  let _ = app.raise(); // ignore error, fallback below
+
+  // Step 2: NSRunningApplication fallback — works for docked/minimized apps.
+  unsafe {
+    let cls = objc2::class!(NSRunningApplication);
+    let ns_app: *mut objc2::runtime::AnyObject =
+      objc2::msg_send![cls, runningApplicationWithProcessIdentifier: pid as i32];
+    if !ns_app.is_null() {
+      // NSApplicationActivateIgnoringOtherApps = 1 << 1 = 2
+      let _: bool = objc2::msg_send![ns_app, activateWithOptions: 2usize];
+    }
   }
+
   std::thread::sleep(std::time::Duration::from_millis(200));
   Ok(())
 }

@@ -20,13 +20,6 @@ pub trait MouseControl {
     button: MouseButton,
     double_click: bool,
   ) -> Result<InputResult>;
-  fn click_by_xpath(
-    &self,
-    handle: &WindowHandle,
-    xpath: &str,
-    button: MouseButton,
-    double_click: bool,
-  ) -> Result<InputResult>;
   fn drag(
     &self,
     handle: &WindowHandle,
@@ -43,13 +36,9 @@ pub trait MouseControl {
 // Keyboard Control
 // ============================================================
 pub trait KeyboardControl {
-  fn type_text(&self, handle: &WindowHandle, text: &str, position: Option<&InputPosition>) -> Result<InputResult>;
-  fn type_text_by_xpath(&self, handle: &WindowHandle, xpath: &str, text: &str) -> Result<InputResult>;
-  /// Type raw text into the focused window using Unicode SendInput.
-  /// Does not search for UIA elements — works with any app including Qt/Electron.
-  fn type_text_raw(&self, handle: &WindowHandle, text: &str) -> Result<()>;
+  fn type_text(&self, scope: ElementScope, text: &str, position: Option<(f64, f64)>, enter: bool, clear: bool)
+    -> Result<()>;
   fn send_keys(&self, keys: &[KeyCode], modifiers: Option<&[KeyCode]>) -> Result<()>;
-  fn send_keys_to_window(&self, handle: &WindowHandle, keys: &[KeyCode], modifiers: Option<&[KeyCode]>) -> Result<()>;
   fn key_down(&self, key: KeyCode) -> Result<()>;
   fn key_release(&self, key: KeyCode) -> Result<()>;
 }
@@ -61,10 +50,8 @@ pub trait WindowManager {
   fn list_windows(&self) -> Result<Vec<WindowInfo>>;
   fn list_visible_windows(&self) -> Result<Vec<WindowInfo>>;
   fn find_windows_by_title(&self, pattern: &str, process_name: Option<&str>) -> Result<Vec<WindowInfo>>;
-  fn find_window_by_title(&self, title: &str) -> Result<WindowHandle>;
+  fn find_windows_by_process(&self, pattern: &str) -> Result<Vec<WindowInfo>>;
   fn get_windows_by_process_id(&self, pid: u32) -> Result<Vec<WindowInfo>>;
-  fn get_windows_by_process_id_with_title(&self, pid: u32, pattern: &str, fuzzy: bool) -> Result<Vec<WindowInfo>>;
-  fn get_child_windows(&self, parent: &WindowHandle) -> Result<Vec<WindowInfo>>;
   fn get_window_title(&self, handle: &WindowHandle) -> Result<String>;
   fn get_foreground_window(&self) -> Result<WindowHandle>;
   fn focus_window(&self, handle: &WindowHandle) -> Result<()>;
@@ -98,6 +85,7 @@ pub trait Element: Send {
   fn can_set_value(&self) -> Result<bool>;
   fn set_range_value(&self, value: f64) -> Result<()>;
   fn focus(&self) -> Result<()>;
+  fn set_focused(&self) -> Result<()>;
   fn is_focused(&self) -> Result<bool>;
   fn confirm(&self) -> Result<()>;
   fn to_xml(&self, indent: usize) -> String;
@@ -107,8 +95,9 @@ pub trait Element: Send {
 // Element Finder
 // ============================================================
 pub trait ElementFinder {
-  fn find_elements_by_xpath(&self, handle: &WindowHandle, xpath: &str) -> Result<Vec<Box<dyn Element>>>;
-  fn find_first_element_by_xpath(&self, handle: &WindowHandle, xpath: &str) -> Result<Box<dyn Element>>;
+  fn query_elements(&self, scope: ElementScope, q: &ElementQuery) -> Result<Vec<Box<dyn Element>>>;
+  fn query_one(&self, scope: ElementScope, q: &ElementQuery) -> Result<Box<dyn Element>>;
+  fn find_by_xpath(&self, scope: ElementScope, xpath: &str) -> Result<Vec<Box<dyn Element>>>;
 }
 
 // ============================================================
@@ -116,6 +105,9 @@ pub trait ElementFinder {
 // ============================================================
 pub trait UiTreeInspector {
   fn get_page_source(&self, handle: &WindowHandle) -> Result<String>;
+  fn get_page_source_verbose(&self, handle: &WindowHandle) -> Result<String>;
+  /// Probe the element at a screen position and dump all its AX attributes.
+  fn probe_at_position(&self, x: i32, y: i32) -> Result<String>;
 }
 
 // ============================================================
@@ -131,6 +123,8 @@ pub trait ScreenCapture {
 // ============================================================
 pub trait ProcessManager {
   fn launch_app(&self, path: &str, wait_timeout_ms: u32) -> Result<u32>;
+  /// Launch app and optionally wait for it to be ready; returns PID.
+  fn launch_app_async(&self, path_or_bundle: &str, wait: bool) -> Result<u32>;
   fn terminate_app(&self, pid: u32) -> Result<bool>;
   fn terminate_apps_by_name(&self, name: &str) -> Result<(u32, u32)>;
   fn get_process_ids_by_name(&self, name: &str) -> Result<Vec<u32>>;

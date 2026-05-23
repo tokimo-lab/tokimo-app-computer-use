@@ -48,15 +48,6 @@ impl MouseControl for WindowsPlatform {
   ) -> Result<InputResult> {
     mouse::click_by_hwnd_pos(handle.0, x, y, button, double_click)
   }
-  fn click_by_xpath(
-    &self,
-    handle: &WindowHandle,
-    xpath: &str,
-    button: MouseButton,
-    double_click: bool,
-  ) -> Result<InputResult> {
-    mouse::click_by_xpath(handle.0, xpath, button, double_click)
-  }
   fn drag(
     &self,
     handle: &WindowHandle,
@@ -75,22 +66,17 @@ impl MouseControl for WindowsPlatform {
 
 // === KeyboardControl ===
 impl KeyboardControl for WindowsPlatform {
-  fn type_text(&self, handle: &WindowHandle, text: &str, position: Option<&InputPosition>) -> Result<InputResult> {
-    keyboard::send_text_by_hwnd(handle.0, position, text)
-  }
-  fn type_text_by_xpath(&self, handle: &WindowHandle, xpath: &str, text: &str) -> Result<InputResult> {
-    keyboard::send_text_by_xpath(handle.0, xpath, text)
-  }
-  fn type_text_raw(&self, handle: &WindowHandle, text: &str) -> Result<()> {
-    let hwnd = HWND(handle.0 as *mut core::ffi::c_void);
-    wnd::bring_window_to_front(hwnd);
-    keyboard::send_text(text)
+  fn type_text(
+    &self,
+    _scope: ElementScope,
+    _text: &str,
+    _position: Option<(f64, f64)>,
+    _enter: bool,
+    _clear: bool,
+  ) -> Result<()> {
+    todo!("windows: type_text")
   }
   fn send_keys(&self, keys: &[KeyCode], modifiers: Option<&[KeyCode]>) -> Result<()> {
-    keyboard::send_keys(keys.to_vec(), modifiers.map(|m| m.to_vec()))
-  }
-  fn send_keys_to_window(&self, _handle: &WindowHandle, keys: &[KeyCode], modifiers: Option<&[KeyCode]>) -> Result<()> {
-    // On Windows, SendInput targets the focused window; just delegate
     keyboard::send_keys(keys.to_vec(), modifiers.map(|m| m.to_vec()))
   }
   fn key_down(&self, key: KeyCode) -> Result<()> {
@@ -134,17 +120,11 @@ impl WindowManager for WindowsPlatform {
         .collect(),
     )
   }
-  fn find_window_by_title(&self, title: &str) -> Result<WindowHandle> {
-    wnd::find_window_handle_by_title(title).map(WindowHandle)
+  fn find_windows_by_process(&self, pattern: &str) -> Result<Vec<WindowInfo>> {
+    todo!("windows: find_windows_by_process")
   }
   fn get_windows_by_process_id(&self, pid: u32) -> Result<Vec<WindowInfo>> {
     wnd::get_all_windows_by_process_id_internal(pid)
-  }
-  fn get_windows_by_process_id_with_title(&self, pid: u32, pattern: &str, fuzzy: bool) -> Result<Vec<WindowInfo>> {
-    wnd::get_all_windows_by_process_id_with_title_internal(pid, pattern, fuzzy)
-  }
-  fn get_child_windows(&self, parent: &WindowHandle) -> Result<Vec<WindowInfo>> {
-    wnd::get_child_windows_internal(parent.0)
   }
   fn get_window_title(&self, handle: &WindowHandle) -> Result<String> {
     wnd::get_window_title_by_handle(handle.0)
@@ -183,13 +163,14 @@ impl WindowManager for WindowsPlatform {
 
 // === ElementFinder ===
 impl ElementFinder for WindowsPlatform {
-  fn find_elements_by_xpath(&self, handle: &WindowHandle, xpath: &str) -> Result<Vec<Box<dyn Element>>> {
-    let elems = elements::find::find_elements_by_handle_xpath_internal(handle.0, xpath)?;
-    Ok(elems.into_iter().map(|e| Box::new(e) as Box<dyn Element>).collect())
+  fn query_elements(&self, _scope: ElementScope, _q: &ElementQuery) -> Result<Vec<Box<dyn Element>>> {
+    todo!("windows: query_elements")
   }
-  fn find_first_element_by_xpath(&self, handle: &WindowHandle, xpath: &str) -> Result<Box<dyn Element>> {
-    let e = elements::utils::find_first_element_by_xpath(handle.0, xpath)?;
-    Ok(Box::new(e))
+  fn query_one(&self, _scope: ElementScope, _q: &ElementQuery) -> Result<Box<dyn Element>> {
+    todo!("windows: query_one")
+  }
+  fn find_by_xpath(&self, _scope: ElementScope, _xpath: &str) -> Result<Vec<Box<dyn Element>>> {
+    todo!("windows: find_by_xpath")
   }
 }
 
@@ -197,6 +178,12 @@ impl ElementFinder for WindowsPlatform {
 impl UiTreeInspector for WindowsPlatform {
   fn get_page_source(&self, handle: &WindowHandle) -> Result<String> {
     elements::source::get_page_source_from_hwnd(handle.0)
+  }
+  fn get_page_source_verbose(&self, handle: &WindowHandle) -> Result<String> {
+    elements::source::get_page_source_from_hwnd(handle.0)
+  }
+  fn probe_at_position(&self, _x: i32, _y: i32) -> Result<String> {
+    Err(anyhow::anyhow!("probe_at_position not implemented for Windows"))
   }
 }
 
@@ -214,6 +201,9 @@ impl ScreenCapture for WindowsPlatform {
 impl ProcessManager for WindowsPlatform {
   fn launch_app(&self, path: &str, wait_timeout_ms: u32) -> Result<u32> {
     process::launch_application_and_get_process_id(path, wait_timeout_ms)
+  }
+  fn launch_app_async(&self, _path_or_bundle: &str, _wait: bool) -> Result<u32> {
+    todo!("windows: launch_app_async")
   }
   fn terminate_app(&self, pid: u32) -> Result<bool> {
     process::terminate_application(pid)

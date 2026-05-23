@@ -15,9 +15,14 @@ path = "src/daemon/main.rs"
 name = "tokimo-app-computer-use"
 path = "src/main.rs"
 
+[features]
+# Enable daemon binary on Windows only (not needed on macOS)
+windows-daemon = []
+
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+thiserror = "2"
 image = { version = "0.25", features = ["png", "jpeg"] }
 webp = "0.3"
 anyhow = "1.0"
@@ -98,6 +103,9 @@ io-kit-sys = "0.5"
 # BLE scanning via CoreBluetooth
 btleplug = "0.12"
 tokio = { version = "1", features = ["rt", "time"] }
+
+# AppKit (NSWorkspace, NSRunningApplication, NSScreen, NSMenu, NSApplication)
+objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSRunningApplication", "NSScreen", "NSMenu", "NSApplication"] }
 
 [profile.release]
 lto = true

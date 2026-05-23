@@ -637,3 +637,36 @@ pub enum KeyCode {
   XButton1,
   XButton2,
 }
+
+/// Element query descriptor for structured UI-element lookup.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ElementQuery {
+  /// AX role / control-type filter (e.g. "Button", "Edit", "Text")
+  pub role: Option<String>,
+  /// Visible text / name filter
+  pub text: Option<String>,
+  /// When true, text must match exactly; otherwise substring match
+  #[serde(default)]
+  pub text_exact: bool,
+  /// If multiple elements match, pick the one at this 0-based index
+  pub index: Option<usize>,
+  /// Maximum depth to search in the AX tree
+  pub max_depth: Option<usize>,
+}
+
+/// Scope that determines where to start an element or keyboard operation.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum ElementScope {
+  /// A specific window identified by its handle
+  Window(WindowHandle),
+  /// The frontmost window of the application with this PID
+  Application(u32),
+  /// Whatever window currently has keyboard focus
+  Foreground,
+}
+
+impl Default for ElementScope {
+  fn default() -> Self {
+    Self::Foreground
+  }
+}

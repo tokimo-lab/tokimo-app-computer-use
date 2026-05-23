@@ -2,10 +2,11 @@ use anyhow::{Result, anyhow};
 use clap::Subcommand;
 use serde_json::json;
 
-use super::CommandExecutor;
+use super::{CommandExecutor, scope::WindowSel};
 
 #[derive(Subcommand, Debug)]
 pub enum ScreenshotAction {
+  /// Capture the full desktop
   Desktop {
     #[arg(long, default_value = "webp")]
     format: String,
@@ -14,9 +15,10 @@ pub enum ScreenshotAction {
     #[arg(long)]
     output: Option<String>,
   },
+  /// Capture a specific window
   Window {
-    #[arg(long, short = 'w')]
-    handle: Option<i64>,
+    #[command(flatten)]
+    sel: WindowSel,
     #[arg(long, default_value = "webp")]
     format: String,
     #[arg(long, default_value = "80")]
@@ -28,24 +30,15 @@ pub enum ScreenshotAction {
 
 pub fn cmd(executor: &mut dyn CommandExecutor, action: ScreenshotAction) -> Result<()> {
   match action {
-    ScreenshotAction::Desktop {
-      format,
-      quality,
-      output,
-    } => {
-      let result = executor.call("screenshot.desktop", json!({"format": format, "quality": quality}))?;
+    ScreenshotAction::Desktop { format, quality, output } => {
+      let result =
+        executor.call("screenshot.desktop", json!({"format": format, "quality": quality}))?;
       save_screenshot(&result, output, &format)?;
     }
-    ScreenshotAction::Window {
-      handle,
-      format,
-      quality,
-      output,
-    } => {
-      let mut params = json!({"format": format, "quality": quality});
-      if let Some(h) = handle {
-        params["handle"] = json!(h);
-      }
+    ScreenshotAction::Window { sel, format, quality, output } => {
+      let mut params = sel.to_json_scope();
+      params["format"] = json!(format);
+      params["quality"] = json!(quality);
       let result = executor.call("screenshot.window", params)?;
       save_screenshot(&result, output, &format)?;
     }

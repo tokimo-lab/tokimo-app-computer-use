@@ -5,6 +5,34 @@ use crate::error::Result;
 use crate::platform::Element;
 use crate::types::*;
 
+/// Attributes that may contain child-like elements for apps that don't expose AXChildren.
+const CHILD_CANDIDATE_ATTRS: &[&str] = &[
+  "AXChildren",
+  "AXVisibleChildren",
+  "AXRows",
+  "AXColumns",
+  "AXTabs",
+  "AXContents",
+  "AXSections",
+  "AXLabelUIElements",
+  "AXLinkedUIElements",
+  "AXServesAsTitleForUIElements",
+  "AXSharedTextElements",
+  "AXSharedCharacterElements",
+  "AXSplitters",
+  "AXLayoutItems",
+  "AXLayoutAreas",
+  "AXDisclosedRows",
+  "AXDisclosedByRow",
+  "AXSelectedRows",
+  "AXVisibleRows",
+  "AXVisibleColumns",
+  "AXVisibleTabs",
+  "AXHeader",
+  "AXRowHeaders",
+  "AXColumnHeaders",
+];
+
 // AX role -> control type mapping
 fn role_to_control_type(role: &str) -> &str {
   match role {
@@ -162,16 +190,171 @@ fn extract_size_from_axvalue(val: &core_foundation::base::CFType) -> Option<(f64
 }
 
 fn get_children(element: &AXUIElement) -> Vec<AXUIElement> {
-  let mut children = Vec::new();
-  if let Ok(arr) = element.attribute(&AXAttribute::children()) {
-    for i in 0..arr.len() {
-      if let Some(item) = arr.get(i) {
-        let child: AXUIElement = item.clone();
-        children.push(child);
+  // Use raw FFI for children access — the accessibility crate's attribute() wrapper
+  // can cause SIGBUS on SwiftUI apps due to incorrect reference counting semantics.
+  // This approach (from kortix-ai/agent-computer-use) uses wrap_under_create_rule
+  // which correctly matches AXUIElementCopyAttributeValue's Create Rule return.
+  let children = get_children_via_ffi(element, "AXChildren");
+  if !children.is_empty() {
+    return children;
+  }
+
+  // Fallback: try alternative attributes for apps that don't expose AXChildren (Qt/Electron).
+  for attr_name in &CHILD_CANDIDATE_ATTRS[1..] {
+    let children = get_children_via_ffi(element, attr_name);
+    if !children.is_empty() {
+      return children;
+    }
+  }
+
+  Vec::new()
+}
+
+/// Get children using raw FFI with proper reference counting.
+/// Uses wrap_under_create_rule to match AXUIElementCopyAttributeValue's return semantics.
+fn get_children_via_ffi(element: &AXUIElement, attr_name: &str) -> Vec<AXUIElement> {
+  use accessibility_sys::{AXUIElementCopyAttributeValue, kAXErrorSuccess};
+
+  let elem_ref = element.as_concrete_TypeRef();
+  let cf_attr = cfstr(attr_name);
+  let mut value: core_foundation::base::CFTypeRef = std::ptr::null_mut();
+
+  let err = unsafe { AXUIElementCopyAttributeValue(elem_ref, cf_attr.as_concrete_TypeRef(), &mut value) };
+  if err != kAXErrorSuccess || value.is_null() {
+    return Vec::new();
+  }
+
+  // wrap_under_create_rule: the API returns a +1 retained object, we own it.
+  let cf_array: core_foundation::array::CFArray<core_foundation::base::CFType> =
+    unsafe { TCFType::wrap_under_create_rule(value as *const _) };
+
+  let count = cf_array.len();
+  if count == 0 {
+    return Vec::new();
+  }
+
+  let ax_type_id = unsafe { accessibility_sys::AXUIElementGetTypeID() };
+  let mut children = Vec::with_capacity(count as usize);
+
+  for i in 0..count {
+    if let Some(item) = cf_array.get(i) {
+      let item_ref = item.as_CFTypeRef();
+      if item_ref.is_null() {
+        continue;
+      }
+      let item_type = unsafe { core_foundation::base::CFGetTypeID(item_ref as *const _) };
+      if item_type == ax_type_id {
+        // Each child from the array is retained by the array.
+        // wrap_under_get_rule calls CFRetain, giving us an independent reference.
+        let ax_ref = item_ref as accessibility_sys::AXUIElementRef;
+        let elem: AXUIElement = unsafe { TCFType::wrap_under_get_rule(ax_ref) };
+        children.push(elem);
       }
     }
   }
+
   children
+}
+
+/// Get children with crash protection.
+fn get_children_safely(element: &AXUIElement) -> Vec<AXUIElement> {
+  std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| get_children(element))).unwrap_or_default()
+}
+
+/// Dump all AX attributes of an element as a JSON-like string (for diagnostics).
+pub fn dump_attributes(element: &AXUIElement) -> String {
+  use accessibility_sys::{AXUIElementCopyAttributeNames, kAXErrorSuccess};
+  use core_foundation::array::CFArray;
+  use core_foundation::string::CFString;
+
+  let mut names_ref: *const core_foundation::array::__CFArray = std::ptr::null();
+  let err = unsafe { AXUIElementCopyAttributeNames(element.as_concrete_TypeRef(), &mut names_ref) };
+  if err != kAXErrorSuccess || names_ref.is_null() {
+    return String::from("{}");
+  }
+  let names: CFArray<CFString> = unsafe { TCFType::wrap_under_create_rule(names_ref as *const _) };
+
+  let mut out = String::from("{\n");
+  for i in 0..names.len() {
+    let Some(name_cf) = names.get(i) else { continue };
+    let name = name_cf.to_string();
+
+    // Get the raw value
+    match element.attribute(&AXAttribute::new(&cfstr(&name))) {
+      Ok(val) => {
+        // Try to extract as string
+        if val.instance_of::<core_foundation::string::CFString>() {
+          let s: CFString = unsafe { TCFType::wrap_under_get_rule(val.as_CFTypeRef() as *const _) };
+          out.push_str(&format!("  \"{}\": \"{}\",\n", name, s.to_string().replace('"', "\\\"")));
+        }
+        // Try to extract as number
+        else if val.instance_of::<core_foundation::number::CFNumber>() {
+          let n: core_foundation::number::CFNumber =
+            unsafe { TCFType::wrap_under_get_rule(val.as_CFTypeRef() as *const _) };
+          if let Some(v) = n.to_i64() {
+            out.push_str(&format!("  \"{}\": {},\n", name, v));
+          } else if let Some(v) = n.to_f64() {
+            out.push_str(&format!("  \"{}\": {},\n", name, v));
+          }
+        }
+        // Try to extract as boolean
+        else if val.instance_of::<core_foundation::boolean::CFBoolean>() {
+          let b: core_foundation::boolean::CFBoolean =
+            unsafe { TCFType::wrap_under_get_rule(val.as_CFTypeRef() as *const _) };
+          out.push_str(&format!("  \"{}\": {},\n", name, bool::from(b)));
+        }
+        // Try to extract as array — show count
+        else if val.instance_of::<core_foundation::array::CFArray>() {
+          let arr: core_foundation::array::CFArray<core_foundation::base::CFType> =
+            unsafe { TCFType::wrap_under_get_rule(val.as_CFTypeRef() as *const _) };
+          out.push_str(&format!("  \"{}\": [{} items],\n", name, arr.len() as usize));
+        }
+        // Try AXValue (point/size/rect)
+        else {
+          use accessibility_sys::{AXValueGetValue, kAXValueTypeCGPoint, kAXValueTypeCGSize, kAXValueTypeCGRect};
+          use core_graphics::geometry::{CGPoint, CGRect, CGSize};
+
+          let mut rect = CGRect { origin: CGPoint { x: 0.0, y: 0.0 }, size: CGSize { width: 0.0, height: 0.0 } };
+          let ok = unsafe {
+            AXValueGetValue(val.as_CFTypeRef() as *mut _, kAXValueTypeCGRect, &mut rect as *mut _ as *mut _)
+          };
+          if ok {
+            out.push_str(&format!(
+              "  \"{}\": [{},{},{},{}],\n",
+              name, rect.origin.x, rect.origin.y, rect.size.width, rect.size.height
+            ));
+          } else {
+            // Try point
+            let mut point = CGPoint { x: 0.0, y: 0.0 };
+            let ok = unsafe {
+              AXValueGetValue(val.as_CFTypeRef() as *mut _, kAXValueTypeCGPoint, &mut point as *mut _ as *mut _)
+            };
+            if ok {
+              out.push_str(&format!("  \"{}\": [{},{}],\n", name, point.x, point.y));
+            } else {
+              // Try size
+              let mut size = CGSize { width: 0.0, height: 0.0 };
+              let ok = unsafe {
+                AXValueGetValue(val.as_CFTypeRef() as *mut _, kAXValueTypeCGSize, &mut size as *mut _ as *mut _)
+              };
+              if ok {
+                out.push_str(&format!("  \"{}\": [{},{}],\n", name, size.width, size.height));
+              } else {
+                // Unknown type, show the CFType description
+                out.push_str(&format!("  \"{}\": <unknown>,\n", name));
+              }
+            }
+          }
+        }
+      }
+      Err(_) => {
+        // Attribute exists but can't be read — likely not applicable to this element
+        out.push_str(&format!("  \"{}\": <not applicable>,\n", name));
+      }
+    }
+  }
+  out.push('}');
+  out
 }
 
 impl Element for MacElement {
@@ -302,15 +485,89 @@ impl Element for MacElement {
       .map_err(|e| anyhow::anyhow!("focus failed: {e:?}"))
   }
 
+  /// Set AXFocused=true on this element to give it keyboard focus.
+  fn set_focused(&self) -> Result<()> {
+    let cf_type: core_foundation::base::CFType =
+      unsafe { TCFType::wrap_under_get_rule(core_foundation::boolean::CFBoolean::true_value().as_CFTypeRef()) };
+    self
+      .element
+      .set_attribute(&AXAttribute::new(&cfstr("AXFocused")), cf_type)
+      .map_err(|e| anyhow::anyhow!("set_focused failed: {e:?}"))
+  }
+
   fn confirm(&self) -> Result<()> {
-    // Try confirm first, fall back to press
+    // Try multiple actions in order of preference:
+    // 1. AXConfirm (standard confirm action)
+    // 2. AXPress (standard press action for buttons)
+    // 3. AXPick (for menu items)
+    // 4. AXShowMenu (for context menus)
+    // 5. AXOpen (for links/files)
+    // 6. Click at center as last resort
+
+    // Try AXConfirm first
     if self.element.confirm().is_ok() {
       return Ok(());
     }
-    self
-      .element
-      .press()
-      .map_err(|e| anyhow::anyhow!("confirm/press failed: {e:?}"))
+
+    // Try AXPress
+    if self.element.press().is_ok() {
+      return Ok(());
+    }
+
+    // Try AXPick for menu items
+    if self.cached_role == "AXMenuItem" || self.cached_role == "AXMenuBarItem" {
+      if self.element.perform_action(&cfstr("AXPick")).is_ok() {
+        return Ok(());
+      }
+    }
+
+    // Try AXShowMenu for context menus
+    if self.element.perform_action(&cfstr("AXShowMenu")).is_ok() {
+      return Ok(());
+    }
+
+    // Try AXOpen for links/files
+    if self.element.perform_action(&cfstr("AXOpen")).is_ok() {
+      return Ok(());
+    }
+
+    // Last resort: click at the center of the element
+    if let Some((x, y)) = self.cached_position {
+      if let Some((w, h)) = self.cached_size {
+        let center_x = x + w / 2.0;
+        let center_y = y + h / 2.0;
+        // Use CGEvent to click at the center
+        use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
+        use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+
+        if let Ok(source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) {
+          let point = core_graphics::geometry::CGPoint::new(center_x, center_y);
+          if let Ok(click_down) = CGEvent::new_mouse_event(
+            source.clone(),
+            CGEventType::LeftMouseDown,
+            point,
+            CGMouseButton::Left,
+          ) {
+            click_down.post(CGEventTapLocation::HID);
+            std::thread::sleep(std::time::Duration::from_millis(50));
+
+            if let Ok(click_up) = CGEvent::new_mouse_event(
+              source.clone(),
+              CGEventType::LeftMouseUp,
+              point,
+              CGMouseButton::Left,
+            ) {
+              click_up.post(CGEventTapLocation::HID);
+              return Ok(());
+            }
+          }
+        }
+      }
+    }
+
+    Err(anyhow::anyhow!(
+      "confirm failed: element does not support any known activation actions"
+    ))
   }
 
   fn is_focused(&self) -> Result<bool> {
@@ -323,43 +580,46 @@ impl Element for MacElement {
   }
 
   fn to_xml(&self, indent: usize) -> String {
-    let pad = "  ".repeat(indent);
-    let aid = self.automation_id();
-    let mut xml = format!(
-      "{pad}<{} Name=\"{}\"",
-      self.control_type(),
-      xml_escape(&self.cached_name),
-    );
-    if !aid.is_empty() {
-      xml.push_str(&format!(" AutomationId=\"{}\"", xml_escape(&aid)));
-    }
-    if let Some(ref val) = self.cached_value {
-      xml.push_str(&format!(" Value=\"{}\"", xml_escape(val)));
-    }
-    xml.push_str(&format!(
-      " Enabled=\"{}\" X=\"{}\" Y=\"{}\" Width=\"{}\" Height=\"{}\"",
-      self.cached_enabled,
-      self.x(),
-      self.y(),
-      self.width(),
-      self.height(),
-    ));
-
-    let children = get_children(&self.element);
-    if children.is_empty() {
-      xml.push_str(" />");
-    } else {
-      xml.push('>');
-      xml.push('\n');
-      for child in children {
-        let child_elem = MacElement::new(child);
-        xml.push_str(&child_elem.to_xml(indent + 1));
-        xml.push('\n');
-      }
-      xml.push_str(&format!("{pad}</{}>", self.control_type()));
-    }
-    xml
+    element_to_xml(self, indent)
   }
+}
+
+fn element_to_xml(elem: &MacElement, indent: usize) -> String {
+  let children = get_children_safely(&elem.element);
+  let pad = "  ".repeat(indent);
+  let aid = elem.automation_id();
+  let mut xml = format!("{pad}<{}", elem.control_type());
+  if !elem.cached_name.is_empty() {
+    xml.push_str(&format!(" Name=\"{}\"", xml_escape(&elem.cached_name)));
+  }
+  if !aid.is_empty() {
+    xml.push_str(&format!(" AutomationId=\"{}\"", xml_escape(&aid)));
+  }
+  if let Some(ref val) = elem.cached_value {
+    xml.push_str(&format!(" Value=\"{}\"", xml_escape(val)));
+  }
+  xml.push_str(&format!(
+    " Enabled=\"{}\" X=\"{}\" Y=\"{}\" Width=\"{}\" Height=\"{}\"",
+    elem.cached_enabled,
+    elem.x(),
+    elem.y(),
+    elem.width(),
+    elem.height(),
+  ));
+
+  if children.is_empty() {
+    xml.push_str(" />");
+  } else {
+    xml.push('>');
+    xml.push('\n');
+    for child in children {
+      let child_elem = MacElement::new(child);
+      xml.push_str(&element_to_xml(&child_elem, indent + 1));
+      xml.push('\n');
+    }
+    xml.push_str(&format!("{pad}</{}>", elem.control_type()));
+  }
+  xml
 }
 
 fn xml_escape(s: &str) -> String {
@@ -386,30 +646,26 @@ fn find_elements_by_selector(root: &AXUIElement, xpath: &str) -> Vec<MacElement>
 
   if parts.len() == 1 {
     // Single-part selector: BFS the entire tree
-    let (target_role, name_filter, _) = parse_selector_part(&parts[0]);
-    return find_all_matching(root, &target_role, &name_filter);
+    let (target_role, name_filter, id_filter, _) = parse_selector_part(&parts[0]);
+    return find_all_matching(root, &target_role, &name_filter, &id_filter);
   }
 
   // Multi-part selector: walk intermediate parts, BFS for leaf
   let leaf_part = &parts[parts.len() - 1];
-  let (leaf_role, leaf_name, _) = parse_selector_part(leaf_part);
+  let (leaf_role, leaf_name, leaf_id, _) = parse_selector_part(leaf_part);
 
   // Find all intermediate containers matching the path prefix
   let mut candidates = vec![root.clone()];
   for (i, part) in parts[..parts.len() - 1].iter().enumerate() {
-    let (target_role, name_filter, _) = parse_selector_part(part);
+    let (target_role, name_filter, id_filter, _) = parse_selector_part(part);
     let mut next = Vec::new();
     for parent in &candidates {
       let mut queue = std::collections::VecDeque::new();
       if i == 0 {
         queue.push_back(parent.clone());
       } else {
-        if let Ok(children) = parent.attribute(&AXAttribute::children()) {
-          for j in 0..children.len() {
-            if let Some(child) = children.get(j) {
-              queue.push_back(child.clone());
-            }
-          }
+        for child in get_children_safely(parent) {
+          queue.push_back(child);
         }
       }
       while let Some(elem) = queue.pop_front() {
@@ -433,16 +689,23 @@ fn find_elements_by_selector(root: &AXUIElement, xpath: &str) -> Vec<MacElement>
           Some(n) => searchable.to_lowercase().contains(&n.to_lowercase()),
           None => true,
         };
-        if matches && name_ok {
+        let id_ok = match &id_filter {
+          Some(id) => {
+            let aid = elem
+              .attribute(&AXAttribute::identifier())
+              .ok()
+              .map(|s| s.to_string())
+              .unwrap_or_default();
+            aid.to_lowercase().contains(&id.to_lowercase())
+          }
+          None => true,
+        };
+        if matches && name_ok && id_ok {
           next.push(elem.clone());
         } else {
           // Keep searching deeper for intermediate parts
-          if let Ok(children) = elem.attribute(&AXAttribute::children()) {
-            for j in 0..children.len() {
-              if let Some(child) = children.get(j) {
-                queue.push_back(child.clone());
-              }
-            }
+          for child in get_children_safely(&elem) {
+            queue.push_back(child);
           }
         }
       }
@@ -453,7 +716,7 @@ fn find_elements_by_selector(root: &AXUIElement, xpath: &str) -> Vec<MacElement>
   // BFS for leaf part within each candidate container
   let mut results = Vec::new();
   for container in &candidates {
-    results.extend(find_all_matching(container, &leaf_role, &leaf_name));
+    results.extend(find_all_matching(container, &leaf_role, &leaf_name, &leaf_id));
   }
   results
 }
@@ -490,7 +753,12 @@ fn split_xpath(xpath: &str) -> Vec<String> {
 
 /// Find all elements matching a single selector part (role + optional name filter)
 /// by doing a full BFS traversal of the tree.
-fn find_all_matching(root: &AXUIElement, target_role: &str, name_filter: &Option<String>) -> Vec<MacElement> {
+fn find_all_matching(
+  root: &AXUIElement,
+  target_role: &str,
+  name_filter: &Option<String>,
+  id_filter: &Option<String>,
+) -> Vec<MacElement> {
   let mut results = Vec::new();
   let mut queue = std::collections::VecDeque::new();
   queue.push_back(root.clone());
@@ -519,17 +787,31 @@ fn find_all_matching(root: &AXUIElement, target_role: &str, name_filter: &Option
       Some(n) => searchable.to_lowercase().contains(&n.to_lowercase()),
       None => true,
     };
+    let matches_id = match id_filter {
+      Some(id) => {
+        // Check both AXIdentifier and AXRoleDescription for @id and @Class filters
+        let aid = elem
+          .attribute(&AXAttribute::identifier())
+          .ok()
+          .map(|s| s.to_string())
+          .unwrap_or_default();
+        let role_desc = elem
+          .attribute(&AXAttribute::role_description())
+          .ok()
+          .map(|s| s.to_string())
+          .unwrap_or_default();
+        aid.to_lowercase().contains(&id.to_lowercase())
+          || role_desc.to_lowercase().contains(&id.to_lowercase())
+      }
+      None => true,
+    };
 
-    if matches_role && matches_name {
+    if matches_role && matches_name && matches_id {
       results.push(MacElement::new(elem.clone()));
     }
 
-    if let Ok(children) = elem.attribute(&AXAttribute::children()) {
-      for i in 0..children.len() {
-        if let Some(child) = children.get(i) {
-          queue.push_back(child.clone());
-        }
-      }
+    for child in get_children_safely(&elem) {
+      queue.push_back(child);
     }
   }
 
@@ -553,8 +835,8 @@ fn get_ax_value_as_string(elem: &AXUIElement) -> String {
     .unwrap_or_default()
 }
 
-fn parse_selector_part(part: &str) -> (String, Option<String>, Option<usize>) {
-  // Parse "Role[@name=\"value\"]" or "Role[index]"
+fn parse_selector_part(part: &str) -> (String, Option<String>, Option<String>, Option<usize>) {
+  // Parse "Role[@name=\"value\"]" or "Role[@id=\"value\"]" or "Role[@Class=\"value\"]" or "Role[index]"
   let (role, rest) = if let Some(bracket_pos) = part.find('[') {
     (&part[..bracket_pos], Some(&part[bracket_pos..]))
   } else {
@@ -564,11 +846,19 @@ fn parse_selector_part(part: &str) -> (String, Option<String>, Option<usize>) {
   let role = if role == "*" { "*" } else { role };
 
   let mut name_filter = None;
+  let mut id_filter = None;
   let mut index_filter = None;
 
   if let Some(rest) = rest {
     let inner = rest.trim_start_matches('[').trim_end_matches(']');
-    if let Some(eq_pos) = inner.find("=\"") {
+    if inner.starts_with("@id=\"") || inner.starts_with("@id='") {
+      let value = inner[5..].trim_end_matches('"').trim_end_matches('\'');
+      id_filter = Some(value.to_string());
+    } else if inner.starts_with("@Class=\"") || inner.starts_with("@Class='") {
+      // @Class="value" — match by class name (role description)
+      let value = inner[8..].trim_end_matches('"').trim_end_matches('\'');
+      id_filter = Some(value.to_string());
+    } else if let Some(eq_pos) = inner.find("=\"") {
       // @name="value" or @name='value'
       let value = inner[eq_pos + 2..].trim_end_matches('"').trim_end_matches('\'');
       name_filter = Some(value.to_string());
@@ -577,7 +867,7 @@ fn parse_selector_part(part: &str) -> (String, Option<String>, Option<usize>) {
     }
   }
 
-  (role.to_string(), name_filter, index_filter)
+  (role.to_string(), name_filter, id_filter, index_filter)
 }
 
 // --- Public API for ElementFinder and UiTreeInspector ---
@@ -602,6 +892,43 @@ pub fn get_page_source(handle: &WindowHandle) -> Result<String> {
   let app = app_for_window_handle(handle)?;
   let elem = MacElement::new(app);
   Ok(elem.to_xml(0))
+}
+
+pub fn get_page_source_verbose(handle: &WindowHandle) -> Result<String> {
+  let app = app_for_window_handle(handle)?;
+  Ok(dump_element_tree(&app, 0))
+}
+
+/// Recursively dump the full attribute set of every element in the tree.
+fn dump_element_tree(element: &AXUIElement, indent: usize) -> String {
+  let pad = "  ".repeat(indent);
+  let mut out = String::new();
+  out.push_str(&format!("{}{}\n", pad, dump_attributes(element)));
+  for child in get_children_safely(element) {
+    out.push_str(&dump_element_tree(&child, indent + 1));
+  }
+  out
+}
+
+/// Probe the element at a screen position and dump all its attributes.
+pub fn probe_at_position(x: i32, y: i32) -> Result<String> {
+  use accessibility_sys::{AXUIElementCopyElementAtPosition, kAXErrorSuccess};
+
+  let system_wide = AXUIElement::system_wide();
+  let mut elem_ref: *mut accessibility_sys::__AXUIElement = std::ptr::null_mut();
+  let err = unsafe {
+    AXUIElementCopyElementAtPosition(
+      system_wide.as_concrete_TypeRef(),
+      x as f32,
+      y as f32,
+      &mut elem_ref,
+    )
+  };
+  if err != kAXErrorSuccess || elem_ref.is_null() {
+    return Ok(format!("No element found at ({}, {}), AXError: {}", x, y, err));
+  }
+  let elem: AXUIElement = unsafe { TCFType::wrap_under_create_rule(elem_ref) };
+  Ok(dump_attributes(&elem))
 }
 
 /// Get the AXUIElement for the application owning a window.

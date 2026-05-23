@@ -2,70 +2,72 @@ use anyhow::Result;
 use clap::Subcommand;
 use serde_json::json;
 
-use super::CommandExecutor;
+use super::{CommandExecutor, scope::WindowSel};
 
 #[derive(Subcommand, Debug)]
 pub enum WindowAction {
+  /// List windows (--all includes hidden/minimized)
   List {
     #[arg(long)]
     all: bool,
-  },
-  Find {
-    title: String,
-  },
-  Search {
-    pattern: String,
     #[arg(long)]
-    process_name: Option<String>,
+    app: Option<String>,
   },
-  Title {
+  /// Find windows by title, process name, or PID
+  Find {
+    #[arg(long)]
+    title: Option<String>,
+    #[arg(long)]
+    process: Option<String>,
+    #[arg(long)]
+    pid: Option<u32>,
+  },
+  /// Show details of a specific window
+  Info {
     handle: i64,
   },
+  /// Bring a window to the foreground
   Focus {
-    handle: i64,
+    #[command(flatten)]
+    sel: WindowSel,
   },
+  /// Move a window to a screen position
   Move {
     handle: i64,
     x: i32,
     y: i32,
   },
+  /// Resize a window
   Resize {
     handle: i64,
-    width: i32,
-    height: i32,
+    w: i32,
+    h: i32,
   },
-  SetRect {
+  /// Move and resize a window in one call
+  Rect {
     handle: i64,
     x: i32,
     y: i32,
-    width: i32,
-    height: i32,
+    w: i32,
+    h: i32,
   },
-  Minimize {
+  /// Change window state (minimize / maximize / restore)
+  State {
     handle: i64,
+    op: String,
   },
-  Maximize {
-    handle: i64,
-  },
-  Restore {
-    handle: i64,
-  },
-  Children {
-    handle: i64,
-  },
-  ByPid {
-    pid: u32,
-  },
-  Info {
-    handle: i64,
-  },
+  /// Show the currently focused window
+  Foreground,
 }
 
 pub fn cmd(executor: &mut dyn CommandExecutor, action: WindowAction) -> Result<()> {
   match action {
-    WindowAction::List { all } => {
-      let method = if all { "window.list" } else { "window.list_visible" };
-      let mut r = executor.call(method, json!({}))?;
+    WindowAction::List { all, app } => {
+      let mut params = json!({"all": all});
+      if let Some(name) = app {
+        params["app"] = json!(name);
+      }
+      let mut r = executor.call("window.list", params)?;
       if all {
         if let Some(arr) = r.as_array_mut() {
           arr.retain(|w| {
@@ -79,69 +81,19 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: WindowAction) -> Result<(
       }
       print_windows_tree(&r, "");
     }
-    WindowAction::Find { title } => {
-      let r = executor.call("window.find_windows_by_title", json!({"pattern": title}))?;
-      print_windows_tree(&r, &title);
-    }
-    WindowAction::Search { pattern, process_name } => {
-      let mut params = json!({"pattern": pattern});
-      if let Some(pn) = process_name {
-        params["process_name"] = json!(pn);
+    WindowAction::Find { title, process, pid } => {
+      let mut params = json!({});
+      if let Some(t) = title {
+        params["title"] = json!(t);
       }
-      let r = executor.call("window.find_windows_by_title", params)?;
-      print_windows_tree(&r, &pattern);
-    }
-    WindowAction::Title { handle } => {
-      let r = executor.call("window.title", json!({"handle": handle}))?;
-      println!("{}", r.as_str().unwrap_or(&r.to_string()));
-    }
-    WindowAction::Focus { handle } => {
-      executor.call("window.focus", json!({"handle": handle}))?;
-      println!("ok");
-    }
-    WindowAction::Move { handle, x, y } => {
-      executor.call("window.move", json!({"handle": handle, "x": x, "y": y}))?;
-      println!("ok");
-    }
-    WindowAction::Resize { handle, width, height } => {
-      executor.call(
-        "window.resize",
-        json!({"handle": handle, "width": width, "height": height}),
-      )?;
-      println!("ok");
-    }
-    WindowAction::SetRect {
-      handle,
-      x,
-      y,
-      width,
-      height,
-    } => {
-      executor.call(
-        "window.set_rect",
-        json!({"handle": handle, "x": x, "y": y, "width": width, "height": height}),
-      )?;
-      println!("ok");
-    }
-    WindowAction::Minimize { handle } => {
-      executor.call("window.minimize", json!({"handle": handle}))?;
-      println!("ok");
-    }
-    WindowAction::Maximize { handle } => {
-      executor.call("window.maximize", json!({"handle": handle}))?;
-      println!("ok");
-    }
-    WindowAction::Restore { handle } => {
-      executor.call("window.restore", json!({"handle": handle}))?;
-      println!("ok");
-    }
-    WindowAction::Children { handle } => {
-      let r = executor.call("window.children", json!({"handle": handle}))?;
-      print_windows(&r);
-    }
-    WindowAction::ByPid { pid } => {
-      let r = executor.call("window.by_process_id", json!({"pid": pid}))?;
-      print_windows(&r);
+      if let Some(p) = process {
+        params["process"] = json!(p);
+      }
+      if let Some(id) = pid {
+        params["pid"] = json!(id);
+      }
+      let r = executor.call("window.find", params)?;
+      print_windows_tree(&r, "");
     }
     WindowAction::Info { handle } => {
       let r = executor.call("window.info", json!({"handle": handle}))?;
@@ -154,6 +106,39 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: WindowAction) -> Result<(
           };
           println!("{k}={val}");
         }
+      }
+    }
+    WindowAction::Focus { sel } => {
+      let mut params = sel.to_json_scope();
+      executor.call("window.focus", params.take())?;
+      println!("ok");
+    }
+    WindowAction::Move { handle, x, y } => {
+      executor.call("window.move", json!({"handle": handle, "x": x, "y": y}))?;
+      println!("ok");
+    }
+    WindowAction::Resize { handle, w, h } => {
+      executor.call("window.resize", json!({"handle": handle, "w": w, "h": h}))?;
+      println!("ok");
+    }
+    WindowAction::Rect { handle, x, y, w, h } => {
+      executor.call("window.rect", json!({"handle": handle, "x": x, "y": y, "w": w, "h": h}))?;
+      println!("ok");
+    }
+    WindowAction::State { handle, op } => {
+      executor.call("window.state", json!({"handle": handle, "op": op}))?;
+      println!("ok");
+    }
+    WindowAction::Foreground => {
+      let r = executor.call("window.foreground", json!({}))?;
+      if let Some(obj) = r.as_object() {
+        let hwnd = obj["hwnd"].as_i64().unwrap_or(0);
+        let pid = obj["processId"].as_u64().unwrap_or(0);
+        let proc = obj["processName"].as_str().unwrap_or("?");
+        let title = obj["title"].as_str().unwrap_or("");
+        println!("{hwnd}  {pid}  {proc}  {title}");
+      } else {
+        println!("{r}");
       }
     }
   }

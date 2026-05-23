@@ -315,6 +315,9 @@ impl Element for WindowsElement {
   fn focus(&self) -> Result<()> {
     self.focus_element()
   }
+  fn set_focused(&self) -> Result<()> {
+    self.focus_element()
+  }
   fn is_focused(&self) -> Result<bool> {
     self.is_focused_val()
   }

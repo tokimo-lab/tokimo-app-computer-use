@@ -1,4 +1,5 @@
 mod audio;
+mod scope;
 mod battery;
 mod bluetooth;
 mod element;

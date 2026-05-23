@@ -2,155 +2,70 @@ use anyhow::{Context, Result};
 use clap::Subcommand;
 use serde_json::json;
 
-use super::{CommandExecutor, print_input_result};
+use super::{CommandExecutor, print_input_result, scope::WindowSel};
 
 #[derive(Subcommand, Debug)]
 pub enum KeyboardAction {
+  /// Type text into a window or element
   Type {
     text: String,
-    #[arg(long, short = 'w')]
-    handle: Option<i64>,
+    #[command(flatten)]
+    sel: WindowSel,
     #[arg(long)]
     x: Option<f64>,
     #[arg(long)]
     y: Option<f64>,
+    /// Press Enter after typing
+    #[arg(long)]
+    enter: bool,
+    /// Clear the field before typing
+    #[arg(long)]
+    clear: bool,
   },
-  TypeXpath {
-    xpath: String,
-    text: String,
-    #[arg(long, short = 'w')]
-    handle: Option<i64>,
+  /// Press a key combination (e.g. "Ctrl+C", "Alt+F4")
+  Press {
+    combo: String,
   },
-  TypeRaw {
-    text: String,
-    #[arg(long, short = 'w')]
-    handle: Option<i64>,
-  },
-  SendKeys {
-    keys: String,
-  },
-  KeyDown {
+  /// Hold a key down
+  Down {
     key: String,
   },
-  KeyUp {
+  /// Release a key
+  Up {
     key: String,
   },
 }
 
 pub fn cmd(executor: &mut dyn CommandExecutor, action: KeyboardAction) -> Result<()> {
   match action {
-    KeyboardAction::Type { handle, text, x, y } => {
-      let mut params = json!({"text": text});
-      if let Some(h) = handle {
-        params["handle"] = json!(h);
-      }
+    KeyboardAction::Type { text, sel, x, y, enter, clear } => {
+      let mut params = sel.to_json_scope();
+      params["text"] = json!(text);
+      params["enter"] = json!(enter);
+      params["clear"] = json!(clear);
       if let (Some(px), Some(py)) = (x, y) {
-        params["position"] = json!({"x": px, "y": py});
+        params["x"] = json!(px);
+        params["y"] = json!(py);
       }
-      let r = executor.call("keyboard.type_text", params)?;
+      let r = executor.call("keyboard.type", params)?;
       print_input_result(&r);
     }
-    KeyboardAction::TypeXpath { handle, xpath, text } => {
-      let mut params = json!({"xpath": xpath, "text": text});
-      if let Some(h) = handle {
-        params["handle"] = json!(h);
-      }
-      let r = executor.call("keyboard.type_text_by_xpath", params)?;
-      print_input_result(&r);
-    }
-    KeyboardAction::TypeRaw { handle, text } => {
-      let mut params = json!({"text": text});
-      if let Some(h) = handle {
-        params["handle"] = json!(h);
-      }
-      executor.call("keyboard.type_raw", params)?;
+    KeyboardAction::Press { combo } => {
+      executor.call("keyboard.press", json!({"combo": combo}))?;
       println!("ok");
     }
-    KeyboardAction::SendKeys { keys } => {
-      let (key_codes, modifiers) = parse_key_combo(&keys)?;
-      let mut params = json!({"keys": key_codes});
-      if !modifiers.is_empty() {
-        params["modifiers"] = json!(modifiers);
-      }
-      executor.call("keyboard.send_keys", params)?;
-      println!("ok");
-    }
-    KeyboardAction::KeyDown { key } => {
-      let key_val: serde_json::Value = serde_json::from_str(&format!("\"{key}\"")).context("invalid key name")?;
+    KeyboardAction::Down { key } => {
+      let key_val: serde_json::Value =
+        serde_json::from_str(&format!("\"{key}\"")).context("invalid key name")?;
       executor.call("keyboard.key_down", json!({"key": key_val}))?;
       println!("ok");
     }
-    KeyboardAction::KeyUp { key } => {
-      let key_val: serde_json::Value = serde_json::from_str(&format!("\"{key}\"")).context("invalid key name")?;
-      executor.call("keyboard.key_release", json!({"key": key_val}))?;
+    KeyboardAction::Up { key } => {
+      let key_val: serde_json::Value =
+        serde_json::from_str(&format!("\"{key}\"")).context("invalid key name")?;
+      executor.call("keyboard.key_up", json!({"key": key_val}))?;
       println!("ok");
     }
   }
   Ok(())
-}
-
-fn parse_key_combo(input: &str) -> Result<(Vec<String>, Vec<String>)> {
-  let parts: Vec<&str> = input.split('+').map(|s| s.trim()).collect();
-  let mut modifiers = Vec::new();
-  let mut main_keys = Vec::new();
-  for part in &parts {
-    let normalized = normalize_key_name(part);
-    if is_modifier(&normalized) {
-      modifiers.push(normalized);
-    } else {
-      main_keys.push(normalized);
-    }
-  }
-  if main_keys.is_empty() {
-    if let Some(last) = modifiers.pop() {
-      main_keys.push(last);
-    }
-  }
-  Ok((main_keys, modifiers))
-}
-
-fn normalize_key_name(name: &str) -> String {
-  match name.to_lowercase().as_str() {
-    "ctrl" | "control" => "Ctrl".to_string(),
-    "shift" => "Shift".to_string(),
-    "alt" => "Alt".to_string(),
-    "win" | "meta" | "super" => "Win".to_string(),
-    "enter" | "return" => "Enter".to_string(),
-    "esc" | "escape" => "Escape".to_string(),
-    "tab" => "Tab".to_string(),
-    "space" | "spacebar" => "Space".to_string(),
-    "backspace" | "back" => "Backspace".to_string(),
-    "del" | "delete" => "Delete".to_string(),
-    "up" | "arrowup" => "Up".to_string(),
-    "down" | "arrowdown" => "Down".to_string(),
-    "left" | "arrowleft" => "Left".to_string(),
-    "right" | "arrowright" => "Right".to_string(),
-    "home" => "Home".to_string(),
-    "end" => "End".to_string(),
-    "pageup" | "pgup" => "PageUp".to_string(),
-    "pagedown" | "pgdn" => "PageDown".to_string(),
-    "insert" | "ins" => "Insert".to_string(),
-    "capslock" | "caps" => "CapsLock".to_string(),
-    "numlock" => "NumLock".to_string(),
-    "scrolllock" => "ScrollLock".to_string(),
-    "printscreen" | "prtsc" => "PrintScreen".to_string(),
-    "pause" | "break" => "Pause".to_string(),
-    "apps" | "menu" => "Apps".to_string(),
-    s if s.starts_with('f') && s[1..].parse::<u32>().is_ok() => format!("F{}", &s[1..]),
-    s if s.len() == 1 => s.to_uppercase(),
-    other => {
-      let mut chars = other.chars();
-      match chars.next() {
-        Some(c) => format!("{}{}", c.to_uppercase(), chars.as_str()),
-        None => other.to_string(),
-      }
-    }
-  }
-}
-
-fn is_modifier(name: &str) -> bool {
-  matches!(
-    name,
-    "Ctrl" | "LCtrl" | "RCtrl" | "Shift" | "LShift" | "RShift" | "Alt" | "LAlt" | "RAlt" | "Win" | "LWin" | "RWin"
-  )
 }
