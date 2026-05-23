@@ -8,8 +8,11 @@ use super::CommandExecutor;
 pub enum WifiAction {
   /// Scan and list all visible WiFi networks
   Scan,
-  /// Get details of a WiFi network by index
-  Detail { index: usize },
+  /// Get details of a WiFi network by SSID or BSSID (MAC address)
+  Detail {
+    /// SSID or BSSID (MAC address) of the network
+    id: String,
+  },
   /// Connect to a WiFi network
   Connect {
     /// SSID to connect to
@@ -38,13 +41,15 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: WifiAction) -> Result<()>
       let mut t = super::Table::new(vec![
         ("IDX", 4),
         ("SSID", 32),
+        ("BSSID", 18),
         ("SIGNAL", 7),
         ("AUTH", 10),
         ("STATUS", 7),
       ])
-      .align_right(2);
+      .align_right(3);
       for (i, w) in arr.iter().enumerate() {
         let ssid = w["ssid"].as_str().unwrap_or("?");
+        let bssid = w["bssid"].as_str().unwrap_or("-");
         let quality = format!("{}%", w["signal_quality"].as_u64().unwrap_or(0));
         let auth = w["auth_type"].as_str().unwrap_or("");
         let connected = if w["is_connected"].as_bool().unwrap_or(false) {
@@ -55,6 +60,7 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: WifiAction) -> Result<()>
         t.row(vec![
           i.to_string(),
           ssid.to_string(),
+          bssid.to_string(),
           quality,
           auth.to_string(),
           connected.to_string(),
@@ -62,14 +68,19 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: WifiAction) -> Result<()>
       }
       t.print();
     }
-    WifiAction::Detail { index } => {
+    WifiAction::Detail { id } => {
       let r = executor.call("system.info", json!({}))?;
       let arr = r["wifi_networks"]
         .as_array()
         .ok_or_else(|| anyhow::anyhow!("No WiFi networks found"))?;
-      let w = arr
-        .get(index)
-        .ok_or_else(|| anyhow::anyhow!("WiFi index {index} out of range"))?;
+      let id_lower = id.to_lowercase();
+      let w = arr.iter().find(|w| {
+        w["ssid"].as_str().map(|s| s.to_lowercase()) == Some(id_lower.clone())
+          || w["bssid"].as_str().map(|s| s.to_lowercase()) == Some(id_lower.clone())
+      });
+      let Some(w) = w else {
+        anyhow::bail!("No WiFi network found matching '{id}'. Run `wifi scan` first.");
+      };
       super::kv_print(&[
         ("SSID:", w["ssid"].as_str().unwrap_or("?")),
         ("Signal:", &format!("{}%", w["signal_quality"].as_u64().unwrap_or(0))),

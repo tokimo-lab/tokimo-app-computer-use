@@ -92,6 +92,9 @@ block2 = "0.6"
 objc2-foundation = "0.3"
 objc2-core-foundation = { version = "0.3", features = ["CFCGTypes"] }
 
+# CoreLocation (for WiFi BSSID/SSID access authorization on macOS 14+)
+objc2-core-location = "0.3"
+
 # Core Audio (volume control, device enumeration)
 coreaudio-rs = "0.14"
 

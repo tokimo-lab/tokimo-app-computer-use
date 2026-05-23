@@ -514,11 +514,11 @@ struct AudioObjectPropertyAddress {
   mElement: u32,
 }
 
-const K_AUDIO_OBJECT_SYSTEM_OBJECT: u32 = 0;
+const K_AUDIO_OBJECT_SYSTEM_OBJECT: u32 = 1;
 const K_AUDIO_HARDWARE_PROPERTY_DEFAULT_OUTPUT_DEVICE: u32 = 0x646F7574; // 'dout'
 const K_AUDIO_HARDWARE_PROPERTY_DEVICES: u32 = 0x64657623; // 'dev#'
 const K_AUDIO_DEVICE_PROPERTY_DEVICE_NAME_CFSTRING: u32 = 0x6C6E616D; // 'lnam'
-const K_AUDIO_DEVICE_PROPERTY_STREAM_CONFIGURATION: u32 = 0x73636173; // 'scas'
+const K_AUDIO_DEVICE_PROPERTY_STREAM_CONFIGURATION: u32 = 0x736C6179; // 'slay'
 const K_AUDIO_DEVICE_PROPERTY_VOLUME_SCALAR: u32 = 0x766F6C6D; // 'volm'
 const K_AUDIO_DEVICE_PROPERTY_MUTE: u32 = 0x6D757465; // 'mute'
 const K_AUDIO_OBJECT_PROPERTY_SCOPE_OUTPUT: u32 = 0x6F757470; // 'outp'
@@ -634,8 +634,8 @@ fn get_audio_devices() -> Vec<AudioDeviceInfo> {
       mScope: K_AUDIO_OBJECT_PROPERTY_SCOPE_GLOBAL,
       mElement: K_AUDIO_OBJECT_PROPERTY_ELEMENT_MAIN,
     };
-    let mut name_buf = [0u8; 256];
-    let mut name_size = name_buf.len() as u32;
+    let mut cf_str: CFStringRef = std::ptr::null();
+    let mut name_size = std::mem::size_of::<CFStringRef>() as u32;
     let st = unsafe {
       AudioObjectGetPropertyData(
         dev_id,
@@ -643,20 +643,14 @@ fn get_audio_devices() -> Vec<AudioDeviceInfo> {
         0,
         std::ptr::null(),
         &mut name_size,
-        name_buf.as_mut_ptr() as *mut c_void,
+        &mut cf_str as *mut CFStringRef as *mut c_void,
       )
     };
-    // name_buf holds a CFStringRef — convert it
-    let name = if st == 0 && name_size >= std::mem::size_of::<usize>() as u32 {
-      let cf_str: CFStringRef = unsafe { *(name_buf.as_ptr() as *const CFStringRef) };
-      if !cf_str.is_null() {
-        let mut cbuf = [0u8; 256];
-        let ok = unsafe { CFStringGetCString(cf_str, cbuf.as_mut_ptr().cast(), cbuf.len() as _, kCFStringEncodingUTF8) };
-        if ok != 0 {
-          unsafe { std::ffi::CStr::from_ptr(cbuf.as_ptr().cast()) }.to_string_lossy().into_owned()
-        } else {
-          format!("Device {dev_id}")
-        }
+    let name = if st == 0 && !cf_str.is_null() {
+      let mut cbuf = [0u8; 256];
+      let ok = unsafe { CFStringGetCString(cf_str, cbuf.as_mut_ptr().cast(), cbuf.len() as _, kCFStringEncodingUTF8) };
+      if ok != 0 {
+        unsafe { std::ffi::CStr::from_ptr(cbuf.as_ptr().cast()) }.to_string_lossy().into_owned()
       } else {
         format!("Device {dev_id}")
       }
@@ -1183,18 +1177,118 @@ pub fn set_default_device(device_id_str: &str) -> Result<()> {
 // WiFi (uses networksetup + airport — no pure-native alternative easily)
 // ---------------------------------------------------------------------------
 
-fn find_wifi_device() -> Option<String> {
-  let output = std::process::Command::new("networksetup")
-    .args(["-listallhardwareports"])
+pub fn get_wifi_networks() -> Vec<WifiNetworkInfo> {
+  // Combine CoreWLAN scan (for RSSI) with system_profiler (for SSID)
+  // macOS 15+ hides SSID from CoreWLAN without entitlements, so we need both sources.
+
+  // Step 1: Get RSSI from CoreWLAN scan (BSSID obtained via arp for connected network)
+  let corewlan_scan = get_corewlan_scan();
+
+  // Step 2: Get SSID and security from system_profiler JSON
+  let Ok(output) = std::process::Command::new("system_profiler")
+    .args(["SPAirPortDataType", "-json"])
     .output()
-    .ok()?;
+  else {
+    return Vec::new();
+  };
+
+  let mut networks = Vec::new();
+  let json_str = String::from_utf8_lossy(&output.stdout);
+  let Ok(json) = serde_json::from_str::<serde_json::Value>(&json_str) else {
+    return networks;
+  };
+
+  // Navigate to the WiFi interface data
+  let Some(interfaces) = json["SPAirPortDataType"][0]["spairport_airport_interfaces"].as_array() else {
+    return networks;
+  };
+
+  for iface in interfaces {
+    // Get WiFi device name (e.g., "en1")
+    let device_name = iface["_name"].as_str().unwrap_or("en1");
+
+    // Get BSSID for connected network using arp table (works without Location Services)
+    let connected_bssid = get_connected_bssid(device_name);
+
+    // Connected network
+    if let Some(current) = iface.get("spairport_current_network_information") {
+      let ssid = current["_name"].as_str().unwrap_or("").to_string();
+      let security = map_security_mode(current["spairport_security_mode"].as_str().unwrap_or(""));
+      let signal = parse_signal_noise(current["spairport_signal_noise"].as_str().unwrap_or("")).unwrap_or(100);
+      if !ssid.is_empty() {
+        networks.push(WifiNetworkInfo {
+          ssid,
+          signal_quality: signal,
+          bssid: connected_bssid,
+          auth_type: Some(security),
+          is_connected: true,
+        });
+      }
+    }
+
+    // Other visible networks
+    if let Some(others) = iface["spairport_airport_other_local_wireless_networks"].as_array() {
+      for (i, net) in others.iter().enumerate() {
+        let ssid = net["_name"].as_str().unwrap_or("").to_string();
+        let security = map_security_mode(net["spairport_security_mode"].as_str().unwrap_or(""));
+
+        // Try to get signal from system_profiler first, then fall back to CoreWLAN RSSI
+        let signal = parse_signal_noise(net["spairport_signal_noise"].as_str().unwrap_or(""))
+          .or_else(|| corewlan_scan.get(i).map(|e| ((e.rssi + 100).max(0) as u32).min(100)))
+          .unwrap_or(0);
+
+        // Get BSSID and SSID from CoreWLAN scan (may be available with Location Services)
+        let bssid = corewlan_scan.get(i).and_then(|e| e.bssid.clone());
+        let ssid = corewlan_scan.get(i).and_then(|e| e.ssid.clone()).unwrap_or(ssid);
+
+        if !ssid.is_empty() {
+          networks.push(WifiNetworkInfo {
+            ssid,
+            signal_quality: signal,
+            bssid,
+            auth_type: Some(security),
+            is_connected: false,
+          });
+        }
+      }
+    }
+  }
+
+  networks
+}
+
+/// CoreWLAN scan result for a single network
+struct CoreWlanScanEntry {
+  rssi: i64,
+  bssid: Option<String>,
+  ssid: Option<String>,
+}
+
+/// Get BSSID of the connected WiFi network using arp table (gateway MAC address).
+/// This doesn't require Location Services authorization on macOS 14+.
+fn get_connected_bssid(wifi_device: &str) -> Option<String> {
+  // Get default gateway IP
+  let output = std::process::Command::new("netstat").args(["-rn"]).output().ok()?;
   let stdout = String::from_utf8_lossy(&output.stdout);
-  let mut lines = stdout.lines();
-  while let Some(line) = lines.next() {
-    if line.contains("Wi-Fi") || line.contains("AirPort") {
-      if let Some(dev_line) = lines.next() {
-        if let Some(dev) = dev_line.strip_prefix("Device:") {
-          return Some(dev.trim().to_string());
+  let gateway_ip = stdout.lines()
+    .find(|line| line.starts_with("default") && line.contains(wifi_device))
+    .and_then(|line| {
+      line.split_whitespace().nth(1)
+    })?;
+
+  // Get MAC address of gateway from arp table
+  let output = std::process::Command::new("arp").args(["-a", "-n"]).output().ok()?;
+  let stdout = String::from_utf8_lossy(&output.stdout);
+  for line in stdout.lines() {
+    if line.contains(gateway_ip) && line.contains(wifi_device) {
+      // Format: "? (10.0.0.1) at 0:f0:cb:ee:b9:b1 on en1 ifscope [ethernet]"
+      if let Some(at_pos) = line.find(" at ") {
+        let rest = &line[at_pos + 4..];
+        if let Some(on_pos) = rest.find(" on ") {
+          let mac = rest[..on_pos].trim();
+          if mac != "(incomplete)" && !mac.is_empty() {
+            return Some(mac.to_string());
+          }
         }
       }
     }
@@ -1202,65 +1296,150 @@ fn find_wifi_device() -> Option<String> {
   None
 }
 
-pub fn get_wifi_networks() -> Vec<WifiNetworkInfo> {
-  let mut networks = Vec::new();
+/// Get RSSI, BSSID and SSID from CoreWLAN scan.
+/// On macOS 14+, BSSID/SSID require Location Services authorization.
+fn get_corewlan_scan() -> Vec<CoreWlanScanEntry> {
+  #[cfg(target_os = "macos")]
+  {
+    use objc2::runtime::{AnyObject, Class};
 
-  // Get current connected network
-  if let Some(device) = find_wifi_device() {
-    let output = std::process::Command::new("networksetup")
-      .args(["-getairportnetwork", &device])
-      .output()
-      .ok();
-    if let Some(out) = output {
-      let stdout = String::from_utf8_lossy(&out.stdout);
-      let line = stdout.trim();
-      if !line.contains("not associated") && !line.is_empty() {
-        let ssid = line.split(':').nth(1).unwrap_or("").trim().to_string();
-        if !ssid.is_empty() {
-          networks.push(WifiNetworkInfo {
-            ssid,
-            signal_quality: 100,
-            bssid: None,
-            auth_type: None,
-            is_connected: true,
-          });
-        }
+    unsafe {
+      // Try to use CWWiFiClient (modern API) for better macOS 14+ compatibility
+      let Some(wifi_client_cls) = Class::get(c"CWWiFiClient") else {
+        return get_corewlan_scan_legacy();
+      };
+
+      let shared_client: *mut AnyObject = objc2::msg_send![wifi_client_cls, sharedWiFiClient];
+      if shared_client.is_null() {
+        return get_corewlan_scan_legacy();
       }
+
+      let interface: *mut AnyObject = objc2::msg_send![shared_client, interface];
+      if interface.is_null() {
+        return Vec::new();
+      }
+
+      // Scan for networks
+      let nil: *mut AnyObject = std::ptr::null_mut();
+      let err: *mut AnyObject = std::ptr::null_mut();
+      let networks_set: *mut AnyObject = objc2::msg_send![interface, scanForNetworksWithName: nil, error: &err];
+      if networks_set.is_null() {
+        return Vec::new();
+      }
+
+      let count: usize = objc2::msg_send![networks_set, count];
+      let enumerator: *mut AnyObject = objc2::msg_send![networks_set, objectEnumerator];
+      let mut entries = Vec::with_capacity(count);
+
+      for _ in 0..count {
+        let network: *mut AnyObject = objc2::msg_send![enumerator, nextObject];
+        if network.is_null() {
+          break;
+        }
+        let rssi: i64 = objc2::msg_send![network, rssiValue];
+
+        // BSSID - may be nil without Location Services authorization
+        let bssid_obj: *mut AnyObject = objc2::msg_send![network, bssid];
+        let bssid = nsstring_to_string(bssid_obj);
+
+        // SSID - may be nil without Location Services authorization
+        let ssid_obj: *mut AnyObject = objc2::msg_send![network, ssid];
+        let ssid = nsstring_to_string(ssid_obj);
+
+        entries.push(CoreWlanScanEntry { rssi, bssid, ssid });
+      }
+
+      entries
     }
   }
+  #[cfg(not(target_os = "macos"))]
+  Vec::new()
+}
 
-  // Try airport scan for available networks
-  let airport = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport";
-  if let Ok(output) = std::process::Command::new(airport).args(["-s"]).output() {
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for line in stdout.lines() {
-      let line = line.trim();
-      if line.is_empty()
-        || line.starts_with("WARNING")
-        || line.contains("deprecated")
-        || line.contains("For diagnosing")
-      {
-        continue;
+/// Fallback using legacy CWInterface class method
+fn get_corewlan_scan_legacy() -> Vec<CoreWlanScanEntry> {
+  #[cfg(target_os = "macos")]
+  {
+    use objc2::runtime::{AnyObject, Class};
+
+    unsafe {
+      let Some(cls) = Class::get(c"CWInterface") else {
+        return Vec::new();
+      };
+      let interface: *mut AnyObject = objc2::msg_send![cls, interface];
+      if interface.is_null() {
+        return Vec::new();
       }
-      let parts: Vec<&str> = line.split_whitespace().collect();
-      if parts.len() >= 7 {
-        let ssid = parts[0].to_string();
-        let rssi: i32 = parts[2].parse().unwrap_or(-100);
-        let signal = ((rssi + 100) as u32).min(100);
-        let security = parts.last().unwrap_or(&"").to_string();
-        if networks.iter().any(|n| n.ssid == ssid) {
-          continue;
+
+      let nil: *mut AnyObject = std::ptr::null_mut();
+      let err: *mut AnyObject = std::ptr::null_mut();
+      let networks_set: *mut AnyObject = objc2::msg_send![interface, scanForNetworksWithName: nil, error: &err];
+      if networks_set.is_null() {
+        return Vec::new();
+      }
+
+      let count: usize = objc2::msg_send![networks_set, count];
+      let enumerator: *mut AnyObject = objc2::msg_send![networks_set, objectEnumerator];
+      let mut entries = Vec::with_capacity(count);
+
+      for _ in 0..count {
+        let network: *mut AnyObject = objc2::msg_send![enumerator, nextObject];
+        if network.is_null() {
+          break;
         }
-        networks.push(WifiNetworkInfo {
-          ssid,
-          signal_quality: signal,
-          bssid: Some(parts[1].to_string()),
-          auth_type: Some(security),
-          is_connected: false,
-        });
+        let rssi: i64 = objc2::msg_send![network, rssiValue];
+
+        let bssid_obj: *mut AnyObject = objc2::msg_send![network, bssid];
+        let bssid = nsstring_to_string(bssid_obj);
+
+        let ssid_obj: *mut AnyObject = objc2::msg_send![network, ssid];
+        let ssid = nsstring_to_string(ssid_obj);
+
+        entries.push(CoreWlanScanEntry { rssi, bssid, ssid });
       }
+
+      entries
     }
   }
+  #[cfg(not(target_os = "macos"))]
+  Vec::new()
+}
 
-  networks
+/// Convert NSString to Rust String, returns None if nil or empty
+#[cfg(target_os = "macos")]
+unsafe fn nsstring_to_string(obj: *mut objc2::runtime::AnyObject) -> Option<String> {
+  use objc2::msg_send;
+  if obj.is_null() {
+    return None;
+  }
+  let utf8: *const std::ffi::c_char = msg_send![obj, UTF8String];
+  if utf8.is_null() {
+    return None;
+  }
+  let s = std::ffi::CStr::from_ptr(utf8).to_string_lossy().into_owned();
+  if s.is_empty() { None } else { Some(s) }
+}
+
+/// Parse "Signal / Noise: -44 dBm / -84 dBm" format, returns signal quality 0-100
+fn parse_signal_noise(s: &str) -> Option<u32> {
+  let dbm_str = s.trim().split_whitespace().next()?;
+  let dbm: i32 = dbm_str.parse().ok()?;
+  Some(((dbm + 100).max(0) as u32).min(100))
+}
+
+/// Map system_profiler security mode enum to human-readable string
+fn map_security_mode(mode: &str) -> String {
+  match mode {
+    "spairport_security_mode_none" => "None".to_string(),
+    "spairport_security_mode_wep" => "WEP".to_string(),
+    "spairport_security_mode_wpa_personal" => "WPA Personal".to_string(),
+    "spairport_security_mode_wpa_enterprise" => "WPA Enterprise".to_string(),
+    "spairport_security_mode_wpa2_personal" => "WPA2 Personal".to_string(),
+    "spairport_security_mode_wpa2_enterprise" => "WPA2 Enterprise".to_string(),
+    "spairport_security_mode_wpa3_personal" => "WPA3 Personal".to_string(),
+    "spairport_security_mode_wpa3_enterprise" => "WPA3 Enterprise".to_string(),
+    "spairport_security_mode_wpa2_personal_mixed" => "WPA/WPA2 Personal".to_string(),
+    "spairport_security_mode_wpa2_enterprise_mixed" => "WPA/WPA2 Enterprise".to_string(),
+    other => other.to_string(),
+  }
 }
