@@ -63,8 +63,13 @@ pub fn read_value(key_path: &str, value_name: Option<&str>) -> Result<(String, S
     )
   };
   if result != ERROR_SUCCESS {
-    unsafe { let _ = RegCloseKey(hkey); }
-    return Err(anyhow!("failed to read value '{:?}': error {result:?}", value_name.unwrap_or("(Default)")));
+    unsafe {
+      let _ = RegCloseKey(hkey);
+    }
+    return Err(anyhow!(
+      "failed to read value '{:?}': error {result:?}",
+      value_name.unwrap_or("(Default)")
+    ));
   }
 
   // Second call: read data
@@ -79,7 +84,9 @@ pub fn read_value(key_path: &str, value_name: Option<&str>) -> Result<(String, S
       Some(&mut data_size),
     )
   };
-  unsafe { let _ = RegCloseKey(hkey); }
+  unsafe {
+    let _ = RegCloseKey(hkey);
+  }
   if result != ERROR_SUCCESS {
     return Err(anyhow!("failed to read value data: error {result:?}"));
   }
@@ -100,9 +107,7 @@ pub fn read_value(key_path: &str, value_name: Option<&str>) -> Result<(String, S
     }
     REG_QWORD => {
       let val = if buf.len() >= 8 {
-        u64::from_ne_bytes([
-          buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7],
-        ])
+        u64::from_ne_bytes([buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7]])
       } else {
         0
       };
@@ -172,7 +177,9 @@ pub fn list_subkeys(key_path: &str) -> Result<Vec<String>> {
     index += 1;
   }
 
-  unsafe { let _ = RegCloseKey(hkey); }
+  unsafe {
+    let _ = RegCloseKey(hkey);
+  }
   Ok(subkeys)
 }
 
@@ -209,7 +216,9 @@ pub fn list_values(key_path: &str) -> Result<Vec<String>> {
     index += 1;
   }
 
-  unsafe { let _ = RegCloseKey(hkey); }
+  unsafe {
+    let _ = RegCloseKey(hkey);
+  }
   Ok(values)
 }
 
@@ -240,19 +249,51 @@ pub fn set_value(key_path: &str, value_name: &str, value_type: &str, data: &str)
   let result = match value_type {
     "REG_SZ" => {
       let data_wide = to_wide(data);
-      unsafe { RegSetValueExW(hkey, PCWSTR(name_wide.as_ptr()), None, REG_SZ, Some(slice_to_bytes(&data_wide))) }
+      unsafe {
+        RegSetValueExW(
+          hkey,
+          PCWSTR(name_wide.as_ptr()),
+          None,
+          REG_SZ,
+          Some(slice_to_bytes(&data_wide)),
+        )
+      }
     }
     "REG_EXPAND_SZ" => {
       let data_wide = to_wide(data);
-      unsafe { RegSetValueExW(hkey, PCWSTR(name_wide.as_ptr()), None, REG_EXPAND_SZ, Some(slice_to_bytes(&data_wide))) }
+      unsafe {
+        RegSetValueExW(
+          hkey,
+          PCWSTR(name_wide.as_ptr()),
+          None,
+          REG_EXPAND_SZ,
+          Some(slice_to_bytes(&data_wide)),
+        )
+      }
     }
     "REG_DWORD" => {
       let val: u32 = data.parse().map_err(|_| anyhow!("invalid DWORD value: '{data}'"))?;
-      unsafe { RegSetValueExW(hkey, PCWSTR(name_wide.as_ptr()), None, REG_DWORD, Some(&val.to_ne_bytes())) }
+      unsafe {
+        RegSetValueExW(
+          hkey,
+          PCWSTR(name_wide.as_ptr()),
+          None,
+          REG_DWORD,
+          Some(&val.to_ne_bytes()),
+        )
+      }
     }
     "REG_QWORD" => {
       let val: u64 = data.parse().map_err(|_| anyhow!("invalid QWORD value: '{data}'"))?;
-      unsafe { RegSetValueExW(hkey, PCWSTR(name_wide.as_ptr()), None, REG_QWORD, Some(&val.to_ne_bytes())) }
+      unsafe {
+        RegSetValueExW(
+          hkey,
+          PCWSTR(name_wide.as_ptr()),
+          None,
+          REG_QWORD,
+          Some(&val.to_ne_bytes()),
+        )
+      }
     }
     "REG_BINARY" => {
       let bytes = parse_hex_bytes(data)?;
@@ -270,12 +311,16 @@ pub fn set_value(key_path: &str, value_name: &str, value_type: &str, data: &str)
       unsafe { RegSetValueExW(hkey, PCWSTR(name_wide.as_ptr()), None, REG_MULTI_SZ, Some(&buf)) }
     }
     other => {
-      unsafe { let _ = RegCloseKey(hkey); }
+      unsafe {
+        let _ = RegCloseKey(hkey);
+      }
       return Err(anyhow!("unsupported value type: '{other}'"));
     }
   };
 
-  unsafe { let _ = RegCloseKey(hkey); }
+  unsafe {
+    let _ = RegCloseKey(hkey);
+  }
   if result != ERROR_SUCCESS {
     return Err(anyhow!("failed to set value: error {result:?}"));
   }
@@ -303,7 +348,9 @@ pub fn create_key(key_path: &str) -> Result<()> {
   if result != ERROR_SUCCESS {
     return Err(anyhow!("failed to create key '{key_path}': error {result:?}"));
   }
-  unsafe { let _ = RegCloseKey(hkey); }
+  unsafe {
+    let _ = RegCloseKey(hkey);
+  }
   Ok(())
 }
 
@@ -312,7 +359,9 @@ pub fn delete_value(key_path: &str, value_name: &str) -> Result<()> {
   let hkey = open_key(key_path, KEY_WRITE)?;
   let name_wide = to_wide(value_name);
   let result = unsafe { RegDeleteValueW(hkey, PCWSTR(name_wide.as_ptr())) };
-  unsafe { let _ = RegCloseKey(hkey); }
+  unsafe {
+    let _ = RegCloseKey(hkey);
+  }
   if result != ERROR_SUCCESS {
     return Err(anyhow!("failed to delete value '{value_name}': error {result:?}"));
   }

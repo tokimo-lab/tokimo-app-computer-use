@@ -1,6 +1,8 @@
 #![allow(non_upper_case_globals)]
 
-use crate::types::{AudioDeviceInfo, GpuInfo, PrinterInfo, SoftwareInfo, StartupEntry, SystemInfo, UsbDeviceInfo, WifiNetworkInfo};
+use crate::types::{
+  AudioDeviceInfo, GpuInfo, PrinterInfo, SoftwareInfo, StartupEntry, SystemInfo, UsbDeviceInfo, WifiNetworkInfo,
+};
 use anyhow::{Context, Result};
 use std::cell::RefCell;
 use std::thread;
@@ -166,7 +168,11 @@ fn enumerate_gpus() -> Vec<GpuInfo> {
     };
 
     let name = String::from_utf16_lossy(
-      &desc.Description[..desc.Description.iter().position(|&c| c == 0).unwrap_or(desc.Description.len())],
+      &desc.Description[..desc
+        .Description
+        .iter()
+        .position(|&c| c == 0)
+        .unwrap_or(desc.Description.len())],
     );
 
     let vendor_id = desc.VendorId;
@@ -200,9 +206,7 @@ fn enumerate_audio_devices() -> Vec<AudioDeviceInfo> {
 
   ensure_com_initialized();
 
-  let enumerator: IMMDeviceEnumerator = match unsafe {
-    CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
-  } {
+  let enumerator: IMMDeviceEnumerator = match unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) } {
     Ok(e) => e,
     Err(_) => return Vec::new(),
   };
@@ -343,7 +347,9 @@ fn enumerate_usb_devices() -> Vec<UsbDeviceInfo> {
     }
   }
 
-  unsafe { let _ = SetupDiDestroyDeviceInfoList(hdev); }
+  unsafe {
+    let _ = SetupDiDestroyDeviceInfoList(hdev);
+  }
   devices
 }
 
@@ -376,9 +382,7 @@ fn get_device_registry_string(
   property: windows::Win32::Devices::DeviceAndDriverInstallation::SETUP_DI_REGISTRY_PROPERTY,
 ) -> Option<String> {
   let mut buf = [0u16; 512];
-  let buf_bytes = unsafe {
-    std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, buf.len() * 2)
-  };
+  let buf_bytes = unsafe { std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, buf.len() * 2) };
   let result = unsafe {
     windows::Win32::Devices::DeviceAndDriverInstallation::SetupDiGetDeviceRegistryPropertyW(
       hdev,
@@ -400,16 +404,22 @@ fn get_device_registry_string(
 
 fn parse_vid_pid(hardware_id: &str) -> (String, String) {
   let upper = hardware_id.to_uppercase();
-  let vid = upper.find("VID_").and_then(|pos| {
-    let rest = &upper[pos + 4..];
-    let end = rest.find(|c: char| !c.is_ascii_hexdigit()).unwrap_or(rest.len());
-    if end >= 4 { Some(rest[..end].to_string()) } else { None }
-  }).unwrap_or_default();
-  let pid = upper.find("PID_").and_then(|pos| {
-    let rest = &upper[pos + 4..];
-    let end = rest.find(|c: char| !c.is_ascii_hexdigit()).unwrap_or(rest.len());
-    if end >= 4 { Some(rest[..end].to_string()) } else { None }
-  }).unwrap_or_default();
+  let vid = upper
+    .find("VID_")
+    .and_then(|pos| {
+      let rest = &upper[pos + 4..];
+      let end = rest.find(|c: char| !c.is_ascii_hexdigit()).unwrap_or(rest.len());
+      if end >= 4 { Some(rest[..end].to_string()) } else { None }
+    })
+    .unwrap_or_default();
+  let pid = upper
+    .find("PID_")
+    .and_then(|pos| {
+      let rest = &upper[pos + 4..];
+      let end = rest.find(|c: char| !c.is_ascii_hexdigit()).unwrap_or(rest.len());
+      if end >= 4 { Some(rest[..end].to_string()) } else { None }
+    })
+    .unwrap_or_default();
   (vid, pid)
 }
 
@@ -419,8 +429,16 @@ fn enumerate_startup_entries() -> Vec<StartupEntry> {
 
   let mut entries = Vec::new();
   let keys = [
-    (HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", "HKCU"),
-    (HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", "HKLM"),
+    (
+      HKEY_CURRENT_USER,
+      r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+      "HKCU",
+    ),
+    (
+      HKEY_LOCAL_MACHINE,
+      r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+      "HKLM",
+    ),
   ];
 
   for (root, subkey, location) in &keys {
@@ -483,7 +501,9 @@ fn enumerate_startup_entries() -> Vec<StartupEntry> {
       }
     }
 
-    unsafe { let _ = RegCloseKey(hkey); };
+    unsafe {
+      let _ = RegCloseKey(hkey);
+    };
   }
 
   entries
@@ -543,7 +563,11 @@ fn enumerate_wifi_networks() -> Vec<WifiNetworkInfo> {
           ssid: current_ssid.clone(),
           signal_quality: current_signal,
           bssid: current_bssid.clone(),
-          auth_type: if current_auth.is_empty() { None } else { Some(current_auth.clone()) },
+          auth_type: if current_auth.is_empty() {
+            None
+          } else {
+            Some(current_auth.clone())
+          },
           is_connected: connected_ssid.as_deref() == Some(current_ssid.as_str()),
         });
       }
@@ -566,7 +590,11 @@ fn enumerate_wifi_networks() -> Vec<WifiNetworkInfo> {
       ssid: current_ssid.clone(),
       signal_quality: current_signal,
       bssid: current_bssid,
-      auth_type: if current_auth.is_empty() { None } else { Some(current_auth) },
+      auth_type: if current_auth.is_empty() {
+        None
+      } else {
+        Some(current_auth)
+      },
       is_connected: connected_ssid.as_deref() == Some(current_ssid.as_str()),
     });
   }
@@ -574,16 +602,17 @@ fn enumerate_wifi_networks() -> Vec<WifiNetworkInfo> {
   networks
 }
 
-fn get_endpoint_volume(device_index: Option<usize>) -> Result<windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume> {
-  use windows::Win32::Media::Audio::*;
+fn get_endpoint_volume(
+  device_index: Option<usize>,
+) -> Result<windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume> {
   use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
+  use windows::Win32::Media::Audio::*;
   use windows::Win32::System::Com::CoCreateInstance;
 
   ensure_com_initialized();
 
-  let enumerator: IMMDeviceEnumerator = unsafe {
-    CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
-  }.context("Failed to create IMMDeviceEnumerator")?;
+  let enumerator: IMMDeviceEnumerator = unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) }
+    .context("Failed to create IMMDeviceEnumerator")?;
 
   let device = match device_index {
     Some(idx) => {
@@ -595,15 +624,12 @@ fn get_endpoint_volume(device_index: Option<usize>) -> Result<windows::Win32::Me
       }
       unsafe { collection.Item(idx as u32) }.context("Failed to get audio device")?
     }
-    None => {
-      unsafe { enumerator.GetDefaultAudioEndpoint(eRender, eConsole) }
-        .context("No default audio output device found")?
-    }
+    None => unsafe { enumerator.GetDefaultAudioEndpoint(eRender, eConsole) }
+      .context("No default audio output device found")?,
   };
 
-  let vol: IAudioEndpointVolume = unsafe {
-    device.Activate(CLSCTX_ALL, None)
-  }.context("Failed to activate IAudioEndpointVolume")?;
+  let vol: IAudioEndpointVolume =
+    unsafe { device.Activate(CLSCTX_ALL, None) }.context("Failed to activate IAudioEndpointVolume")?;
 
   Ok(vol)
 }
@@ -611,29 +637,25 @@ fn get_endpoint_volume(device_index: Option<usize>) -> Result<windows::Win32::Me
 pub fn set_audio_volume(device_index: Option<usize>, level: u32) -> Result<()> {
   let vol = get_endpoint_volume(device_index)?;
   let scalar = (level.min(100) as f32) / 100.0;
-  unsafe { vol.SetMasterVolumeLevelScalar(scalar, std::ptr::null()) }
-    .context("SetMasterVolumeLevelScalar failed")?;
+  unsafe { vol.SetMasterVolumeLevelScalar(scalar, std::ptr::null()) }.context("SetMasterVolumeLevelScalar failed")?;
   Ok(())
 }
 
 pub fn get_audio_volume(device_index: Option<usize>) -> Result<u32> {
   let vol = get_endpoint_volume(device_index)?;
-  let scalar = unsafe { vol.GetMasterVolumeLevelScalar() }
-    .context("GetMasterVolumeLevelScalar failed")?;
+  let scalar = unsafe { vol.GetMasterVolumeLevelScalar() }.context("GetMasterVolumeLevelScalar failed")?;
   Ok((scalar * 100.0).round() as u32)
 }
 
 pub fn set_audio_mute(device_index: Option<usize>, muted: bool) -> Result<()> {
   let vol = get_endpoint_volume(device_index)?;
-  unsafe { vol.SetMute(muted, std::ptr::null()) }
-    .context("SetMute failed")?;
+  unsafe { vol.SetMute(muted, std::ptr::null()) }.context("SetMute failed")?;
   Ok(())
 }
 
 pub fn get_audio_mute(device_index: Option<usize>) -> Result<bool> {
   let vol = get_endpoint_volume(device_index)?;
-  let muted = unsafe { vol.GetMute() }
-    .context("GetMute failed")?;
+  let muted = unsafe { vol.GetMute() }.context("GetMute failed")?;
   Ok(muted.as_bool())
 }
 
@@ -694,15 +716,7 @@ pub fn set_default_audio_device(device_id: &str) -> Result<()> {
   }
 
   let mut obj = core::ptr::null_mut();
-  let hr = unsafe {
-    CoCreateInstance(
-      &clsid,
-      core::ptr::null_mut(),
-      CLSCTX_ALL.0,
-      &iid,
-      &mut obj,
-    )
-  };
+  let hr = unsafe { CoCreateInstance(&clsid, core::ptr::null_mut(), CLSCTX_ALL.0, &iid, &mut obj) };
   if hr.is_err() {
     anyhow::bail!("CoCreateInstance for IPolicyConfig failed: {:?}", hr);
   }
@@ -761,15 +775,24 @@ pub fn get_screen_size() -> Result<(i32, i32)> {
 }
 
 pub fn get_installed_software() -> Result<Vec<SoftwareInfo>> {
-  use windows::Win32::System::Registry::*;
   use windows::Win32::Foundation::*;
+  use windows::Win32::System::Registry::*;
 
   let mut software = Vec::new();
 
   let keys = [
-    (HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
-    (HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
-    (HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+    (
+      HKEY_LOCAL_MACHINE,
+      r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+    ),
+    (
+      HKEY_LOCAL_MACHINE,
+      r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+    ),
+    (
+      HKEY_CURRENT_USER,
+      r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+    ),
   ];
 
   for (root, subkey) in &keys {
@@ -823,7 +846,9 @@ pub fn get_installed_software() -> Result<Vec<SoftwareInfo>> {
       index += 1;
     }
 
-    unsafe { let _ = RegCloseKey(hkey); };
+    unsafe {
+      let _ = RegCloseKey(hkey);
+    };
   }
 
   software.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
@@ -831,8 +856,8 @@ pub fn get_installed_software() -> Result<Vec<SoftwareInfo>> {
 }
 
 fn read_uninstall_entry(parent: windows::Win32::System::Registry::HKEY, subkey_name: &str) -> Option<SoftwareInfo> {
-  use windows::Win32::System::Registry::*;
   use windows::Win32::Foundation::*;
+  use windows::Win32::System::Registry::*;
 
   let subkey_w: Vec<u16> = subkey_name.encode_utf16().chain(std::iter::once(0)).collect();
   let mut hkey = HKEY::default();
@@ -862,13 +887,15 @@ fn read_uninstall_entry(parent: windows::Win32::System::Registry::HKEY, subkey_n
     estimated_size_kb: read_reg_dword(hkey, "EstimatedSize"),
   };
 
-  unsafe { let _ = RegCloseKey(hkey); };
+  unsafe {
+    let _ = RegCloseKey(hkey);
+  };
   Some(info)
 }
 
 fn read_reg_string(hkey: windows::Win32::System::Registry::HKEY, value_name: &str) -> Option<String> {
-  use windows::Win32::System::Registry::*;
   use windows::Win32::Foundation::*;
+  use windows::Win32::System::Registry::*;
 
   let name_w: Vec<u16> = value_name.encode_utf16().chain(std::iter::once(0)).collect();
   let mut buf = [0u16; 512];
@@ -896,8 +923,8 @@ fn read_reg_string(hkey: windows::Win32::System::Registry::HKEY, value_name: &st
 }
 
 fn read_reg_dword(hkey: windows::Win32::System::Registry::HKEY, value_name: &str) -> Option<u32> {
-  use windows::Win32::System::Registry::*;
   use windows::Win32::Foundation::*;
+  use windows::Win32::System::Registry::*;
 
   let name_w: Vec<u16> = value_name.encode_utf16().chain(std::iter::once(0)).collect();
   let mut value = 0u32;
@@ -992,19 +1019,14 @@ pub fn print_document(file_path: &str, printer_name: &str) -> Result<()> {
     .unwrap_or("document")
     .to_string();
 
-  let content = std::fs::read(&path)
-    .with_context(|| format!("cannot read file: {}", path.display()))?;
+  let content = std::fs::read(&path).with_context(|| format!("cannot read file: {}", path.display()))?;
 
   let printer_w = HSTRING::from(printer_name);
   let file_name_w = HSTRING::from(file_name.as_str());
 
   unsafe {
     let mut h_printer = Default::default();
-    let result = OpenPrinterW(
-      PWSTR(printer_w.as_ptr() as *mut _),
-      &mut h_printer,
-      None,
-    );
+    let result = OpenPrinterW(PWSTR(printer_w.as_ptr() as *mut _), &mut h_printer, None);
     if result.is_err() {
       anyhow::bail!("cannot open printer: {printer_name}");
     }

@@ -35,10 +35,13 @@ fn find_pwsh() -> Option<String> {
   }
 
   // 3. PATH fallback
-  if Command::new("pwsh").arg("--version")
+  if Command::new("pwsh")
+    .arg("--version")
     .stdout(std::process::Stdio::null())
     .stderr(std::process::Stdio::null())
-    .status().map(|s| s.success()).unwrap_or(false)
+    .status()
+    .map(|s| s.success())
+    .unwrap_or(false)
   {
     return Some("pwsh".to_string());
   }
@@ -47,8 +50,8 @@ fn find_pwsh() -> Option<String> {
 }
 
 fn reg_app_paths(exe_name: &str) -> Option<String> {
-  use windows::Win32::System::Registry::*;
   use windows::Win32::Foundation::*;
+  use windows::Win32::System::Registry::*;
 
   let key_path = format!(r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{exe_name}");
   let key_w: Vec<u16> = key_path.encode_utf16().chain(std::iter::once(0)).collect();
@@ -95,7 +98,9 @@ fn reg_app_paths(exe_name: &str) -> Option<String> {
     )
   };
 
-  unsafe { let _ = RegCloseKey(hkey); };
+  unsafe {
+    let _ = RegCloseKey(hkey);
+  };
 
   if status != ERROR_SUCCESS || data_type != REG_SZ {
     return None;

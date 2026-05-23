@@ -24,9 +24,7 @@ fn find_elements_with_raw_walker(
   if depth > 50 {
     return Ok(());
   }
-  if !include_offscreen
-    && unsafe { start.CurrentIsOffscreen().unwrap_or(BOOL::from(true)).as_bool() }
-  {
+  if !include_offscreen && unsafe { start.CurrentIsOffscreen().unwrap_or(BOOL::from(true)).as_bool() } {
     return Ok(());
   }
   if matcher(start) {
@@ -193,16 +191,18 @@ fn parse_single_predicate(p: &str) -> Result<Option<Predicate>> {
   if p.contains(" or ") {
     let parts: Vec<&str> = p.split(" or ").collect();
     if parts.len() == 2
-      && let (Some(l), Some(r)) = (parse_single_predicate(parts[0])?, parse_single_predicate(parts[1])?) {
-        return Ok(Some(Predicate::Or(Box::new(l), Box::new(r))));
-      }
+      && let (Some(l), Some(r)) = (parse_single_predicate(parts[0])?, parse_single_predicate(parts[1])?)
+    {
+      return Ok(Some(Predicate::Or(Box::new(l), Box::new(r))));
+    }
   }
   if p.contains(" and ") {
     let parts: Vec<&str> = p.split(" and ").collect();
     if parts.len() == 2
-      && let (Some(l), Some(r)) = (parse_single_predicate(parts[0])?, parse_single_predicate(parts[1])?) {
-        return Ok(Some(Predicate::And(Box::new(l), Box::new(r))));
-      }
+      && let (Some(l), Some(r)) = (parse_single_predicate(parts[0])?, parse_single_predicate(parts[1])?)
+    {
+      return Ok(Some(Predicate::And(Box::new(l), Box::new(r))));
+    }
   }
   if let Some(stripped) = p.strip_prefix("position()=") {
     if let Ok(pos) = stripped.parse::<i32>() {

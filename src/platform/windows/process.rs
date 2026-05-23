@@ -7,6 +7,8 @@ use windows::Win32::System::Threading::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::BOOL;
 
+use crate::types::ProcessInfo;
+
 pub fn get_process_name(process_id: u32) -> String {
   if process_id == 0 {
     return "System Idle Process".to_string();
@@ -219,4 +221,68 @@ fn has_windows_for_process(pid: u32) -> bool {
       && IsWindowVisible(h).as_bool()
       && (GetWindowLongPtrW(h, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW.0) == 0
   })
+}
+
+pub fn list_processes() -> Result<Vec<ProcessInfo>> {
+  use windows::Win32::System::Diagnostics::ToolHelp::*;
+  let mut processes = Vec::new();
+  unsafe {
+    let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).context("CreateToolhelp32Snapshot")?;
+    let mut entry = PROCESSENTRY32W {
+      dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+      ..Default::default()
+    };
+    if Process32FirstW(snapshot, &mut entry).is_ok() {
+      loop {
+        let name = String::from_utf16_lossy(&entry.szExeFile)
+          .trim_end_matches('\0')
+          .to_string();
+        processes.push(ProcessInfo {
+          pid: entry.th32ProcessID,
+          name,
+          thread_count: entry.cntThreads,
+          parent_pid: entry.th32ParentProcessID,
+          memory_bytes: 0,
+        });
+        if Process32NextW(snapshot, &mut entry).is_err() {
+          break;
+        }
+      }
+    }
+    let _ = CloseHandle(snapshot);
+  }
+  Ok(processes)
+}
+
+pub fn get_process_info(pid: u32) -> Result<ProcessInfo> {
+  use windows::Win32::System::Diagnostics::ToolHelp::*;
+  unsafe {
+    let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).context("CreateToolhelp32Snapshot")?;
+    let mut entry = PROCESSENTRY32W {
+      dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+      ..Default::default()
+    };
+    if Process32FirstW(snapshot, &mut entry).is_ok() {
+      loop {
+        if entry.th32ProcessID == pid {
+          let name = String::from_utf16_lossy(&entry.szExeFile)
+            .trim_end_matches('\0')
+            .to_string();
+          let _ = CloseHandle(snapshot);
+          return Ok(ProcessInfo {
+            pid: entry.th32ProcessID,
+            name,
+            thread_count: entry.cntThreads,
+            parent_pid: entry.th32ParentProcessID,
+            memory_bytes: 0,
+          });
+        }
+        if Process32NextW(snapshot, &mut entry).is_err() {
+          break;
+        }
+      }
+    }
+    let _ = CloseHandle(snapshot);
+  }
+  Err(anyhow::anyhow!("process not found: {pid}"))
 }

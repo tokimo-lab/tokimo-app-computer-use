@@ -1,18 +1,15 @@
+#![cfg(windows)]
 use std::thread;
 use std::time::Duration;
+use tokimo_app_computer_use::WindowHandle;
 use tokimo_app_computer_use::create_platform;
 use tokimo_app_computer_use::platform::*;
-use tokimo_app_computer_use::WindowHandle;
 
 fn setup() -> impl PlatformProvider + Send + Sync {
   create_platform()
 }
 
-fn launch_and_get_handle(
-  platform: &dyn PlatformProvider,
-  path: &str,
-  title_pattern: &str,
-) -> (u32, WindowHandle) {
+fn launch_and_get_handle(platform: &dyn PlatformProvider, path: &str, title_pattern: &str) -> (u32, WindowHandle) {
   let _launcher_pid = platform.launch_app(path, 3000).expect("launch app");
   thread::sleep(Duration::from_millis(3000));
   let windows = platform
@@ -25,8 +22,7 @@ fn launch_and_get_handle(
 
 fn with_calculator<F: FnOnce(&dyn PlatformProvider, WindowHandle, u32)>(f: F) {
   let platform = setup();
-  let (pid, handle) =
-    launch_and_get_handle(&platform, r"C:\Windows\System32\calc.exe", "Calculator");
+  let (pid, handle) = launch_and_get_handle(&platform, r"C:\Windows\System32\calc.exe", "Calculator");
   f(&platform, handle, pid);
   let _ = platform.terminate_app(pid);
 }
@@ -68,8 +64,7 @@ fn test_find_element_by_name_attribute() {
 #[test]
 fn test_find_element_by_automation_id() {
   with_calculator(|platform, handle, _| {
-    let elements =
-      platform.find_elements_by_xpath(&handle, "//Button[@AutomationId='num5Button']");
+    let elements = platform.find_elements_by_xpath(&handle, "//Button[@AutomationId='num5Button']");
     if let Ok(elems) = elements
       && !elems.is_empty()
     {
@@ -81,8 +76,7 @@ fn test_find_element_by_automation_id() {
 #[test]
 fn test_find_element_contains() {
   with_calculator(|platform, handle, _| {
-    let elements =
-      platform.find_elements_by_xpath(&handle, "//Button[contains(@Name,'One')]");
+    let elements = platform.find_elements_by_xpath(&handle, "//Button[contains(@Name,'One')]");
     assert!(elements.is_ok(), "contains() xpath should work");
     let elements = elements.unwrap();
     assert!(!elements.is_empty(), "Should find button containing 'One'");
@@ -153,10 +147,7 @@ fn test_get_page_source() {
     let xml = platform.get_page_source(&handle).expect("get page source");
     assert!(!xml.is_empty(), "Page source should not be empty");
     assert!(xml.contains("<?xml"), "Should start with XML declaration");
-    assert!(
-      xml.contains("UIAutomationTree"),
-      "Should contain root element"
-    );
+    assert!(xml.contains("UIAutomationTree"), "Should contain root element");
   });
 }
 

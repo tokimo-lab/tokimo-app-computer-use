@@ -15,10 +15,18 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: GpuAction) -> Result<()> 
     GpuAction::Info => {
       let r = executor.call("system.info", json!({}))?;
       let gpus = r["gpus"].as_array();
-      let Some(arr) = gpus else { println!("No GPU found."); return Ok(()) };
-      if arr.is_empty() { println!("No GPU found."); return Ok(()); }
+      let Some(arr) = gpus else {
+        println!("No GPU found.");
+        return Ok(());
+      };
+      if arr.is_empty() {
+        println!("No GPU found.");
+        return Ok(());
+      }
       for (i, g) in arr.iter().enumerate() {
-        if i > 0 { println!(); }
+        if i > 0 {
+          println!();
+        }
         println!("GPU {}:", i);
         println!("  Name:              {}", g["name"].as_str().unwrap_or("?"));
 
@@ -38,7 +46,11 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: GpuAction) -> Result<()> 
         let vendor = g["vendor_id"].as_u64().unwrap_or(0);
         let device = g["device_id"].as_u64().unwrap_or(0);
         if vendor > 0 {
-          println!("  Vendor ID:         0x{:04X} ({})", vendor, pci_vendor_name(vendor as u32));
+          println!(
+            "  Vendor ID:         0x{:04X} ({})",
+            vendor,
+            pci_vendor_name(vendor as u32)
+          );
         }
         if device > 0 {
           println!("  Device ID:         0x{:04X}", device);

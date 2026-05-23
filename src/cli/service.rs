@@ -26,8 +26,14 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: ServiceAction) -> Result<
   match action {
     ServiceAction::List { filter } => {
       let r = executor.call("service.list", json!({}))?;
-      let Some(arr) = r.as_array() else { println!("No services found."); return Ok(()) };
-      if arr.is_empty() { println!("No services found."); return Ok(()); }
+      let Some(arr) = r.as_array() else {
+        println!("No services found.");
+        return Ok(());
+      };
+      if arr.is_empty() {
+        println!("No services found.");
+        return Ok(());
+      }
       let mut t = super::Table::new(vec![("NAME", 32), ("STATUS", 9), ("DISPLAY NAME", 44)]);
       for s in arr {
         let name = s["name"].as_str().unwrap_or("?");
@@ -35,7 +41,9 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: ServiceAction) -> Result<
         let status = s["status"].as_str().unwrap_or("?");
         if let Some(f) = &filter {
           let pat = f.to_lowercase();
-          if !name.to_lowercase().contains(&pat) && !display.to_lowercase().contains(&pat) { continue; }
+          if !name.to_lowercase().contains(&pat) && !display.to_lowercase().contains(&pat) {
+            continue;
+          }
         }
         t.row(vec![name.to_string(), status.to_string(), display.to_string()]);
       }

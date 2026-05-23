@@ -112,24 +112,26 @@ impl WindowsElement {
       self
         .element
         .GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId)
+    } && let Ok(v) = unsafe { vp.CurrentValue() }
+      && !v.is_empty()
+    {
+      return Ok(v.to_string());
     }
-      && let Ok(v) = unsafe { vp.CurrentValue() }
-        && !v.is_empty() {
-          return Ok(v.to_string());
-        }
     if let Ok(n) = unsafe { self.element.CurrentName() }
-      && !n.is_empty() {
-        return Ok(n.to_string());
-      }
+      && !n.is_empty()
+    {
+      return Ok(n.to_string());
+    }
     Ok(String::new())
   }
 
   pub fn get_value(&self) -> Result<String> {
     unsafe {
       if let Ok(p) = self.element.GetCurrentPattern(UIA_ValuePatternId)
-        && let Ok(vp) = p.cast::<IUIAutomationValuePattern>() {
-          return Ok(vp.CurrentValue().context("GetValue")?.to_string());
-        }
+        && let Ok(vp) = p.cast::<IUIAutomationValuePattern>()
+      {
+        return Ok(vp.CurrentValue().context("GetValue")?.to_string());
+      }
       Err(anyhow!("No ValuePattern"))
     }
   }
@@ -163,9 +165,10 @@ impl WindowsElement {
         return Ok(false);
       }
       if let Ok(p) = self.element.GetCurrentPattern(UIA_ValuePatternId)
-        && let Ok(vp) = p.cast::<IUIAutomationValuePattern>() {
-          return Ok(!vp.CurrentIsReadOnly().context("readonly")?.as_bool());
-        }
+        && let Ok(vp) = p.cast::<IUIAutomationValuePattern>()
+      {
+        return Ok(!vp.CurrentIsReadOnly().context("readonly")?.as_bool());
+      }
       Ok(false)
     }
   }
@@ -176,18 +179,19 @@ impl WindowsElement {
         return Err(anyhow!("Not enabled"));
       }
       if let Ok(p) = self.element.GetCurrentPattern(UIA_RangeValuePatternId)
-        && let Ok(rp) = p.cast::<IUIAutomationRangeValuePattern>() {
-          if rp.CurrentIsReadOnly().context("readonly")?.as_bool() {
-            return Err(anyhow!("Read-only"));
-          }
-          let min = rp.CurrentMinimum().context("min")?;
-          let max = rp.CurrentMaximum().context("max")?;
-          if value < min || value > max {
-            return Err(anyhow!("Out of range {}-{}", min, max));
-          }
-          rp.SetValue(value).context("SetValue")?;
-          return Ok(());
+        && let Ok(rp) = p.cast::<IUIAutomationRangeValuePattern>()
+      {
+        if rp.CurrentIsReadOnly().context("readonly")?.as_bool() {
+          return Err(anyhow!("Read-only"));
         }
+        let min = rp.CurrentMinimum().context("min")?;
+        let max = rp.CurrentMaximum().context("max")?;
+        if value < min || value > max {
+          return Err(anyhow!("Out of range {}-{}", min, max));
+        }
+        rp.SetValue(value).context("SetValue")?;
+        return Ok(());
+      }
       Err(anyhow!("No RangeValuePattern"))
     }
   }
@@ -313,6 +317,9 @@ impl Element for WindowsElement {
   }
   fn is_focused(&self) -> Result<bool> {
     self.is_focused_val()
+  }
+  fn confirm(&self) -> Result<()> {
+    Err(anyhow::anyhow!("confirm not implemented on Windows"))
   }
   fn to_xml(&self, indent: usize) -> String {
     self.to_xml_string(indent)

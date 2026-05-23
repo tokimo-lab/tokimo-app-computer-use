@@ -3,7 +3,7 @@ use crate::platform::PlatformProvider;
 use crate::types::*;
 use serde_json::json;
 
-pub fn handle_request<P: PlatformProvider>(platform: &P, req: Request) -> Response {
+pub fn handle_request<P: PlatformProvider + ?Sized>(platform: &P, req: Request) -> Response {
   let result = dispatch(platform, &req.method, &req.params);
   match result {
     Ok(value) => Response::success(req.id, value),
@@ -11,7 +11,7 @@ pub fn handle_request<P: PlatformProvider>(platform: &P, req: Request) -> Respon
   }
 }
 
-fn dispatch<P: PlatformProvider>(
+pub fn dispatch<P: PlatformProvider + ?Sized>(
   platform: &P,
   method: &str,
   params: &serde_json::Value,
@@ -86,6 +86,7 @@ fn dispatch<P: PlatformProvider>(
       platform.restore_window(&handle)?;
       Ok(json!(null))
     }
+    "window.foreground" => Ok(json!(platform.get_foreground_window()?)),
     "window.children" => {
       let handle = req_handle(params)?;
       Ok(json!(platform.get_child_windows(&handle)?))
@@ -198,6 +199,7 @@ fn dispatch<P: PlatformProvider>(
         .map(|e| {
           json!({
               "name": e.name(),
+              "text": e.text(),
               "automation_id": e.automation_id(),
               "class_name": e.class_name(),
               "control_type": e.control_type(),
@@ -213,6 +215,16 @@ fn dispatch<P: PlatformProvider>(
     "element.page_source" => {
       let handle = req_handle(params)?;
       Ok(json!(platform.get_page_source(&handle)?))
+    }
+    "element.type_and_submit" => {
+      let handle = req_handle(params)?;
+      let xpath = req_str(params, "xpath")?;
+      let text = req_str(params, "text")?;
+      // Type into element (same as Windows: set_value or click+type)
+      platform.type_text_by_xpath(&handle, xpath, text)?;
+      // Press Enter (window should be focused from type_text_by_xpath)
+      platform.send_keys(&[KeyCode::Enter], None)?;
+      Ok(json!(null))
     }
 
     // Screenshot
@@ -249,6 +261,14 @@ fn dispatch<P: PlatformProvider>(
     "process.get_pids" => {
       let name = req_str(params, "name")?;
       Ok(json!(platform.get_process_ids_by_name(name)?))
+    }
+    "process.list" => {
+      let processes = platform.list_processes()?;
+      Ok(json!(processes))
+    }
+    "process.info" => {
+      let pid = req_u32(params, "pid")?;
+      Ok(json!(platform.get_process_info(pid)?))
     }
 
     // System
@@ -341,7 +361,10 @@ fn dispatch<P: PlatformProvider>(
         let f_lower = f.to_lowercase();
         software.retain(|s| {
           s.name.to_lowercase().contains(&f_lower)
-            || s.publisher.as_ref().is_some_and(|p| p.to_lowercase().contains(&f_lower))
+            || s
+              .publisher
+              .as_ref()
+              .is_some_and(|p| p.to_lowercase().contains(&f_lower))
         });
       }
       Ok(json!(software))
@@ -352,7 +375,11 @@ fn dispatch<P: PlatformProvider>(
       let name = req_str(params, "name")?;
       let command = req_str(params, "command")?;
       let location = params.get("location").and_then(|v| v.as_str()).unwrap_or("HKCU");
-      let root = if location.to_uppercase() == "HKLM" { "HKLM" } else { "HKCU" };
+      let root = if location.to_uppercase() == "HKLM" {
+        "HKLM"
+      } else {
+        "HKCU"
+      };
       let key_path = format!("{root}\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run");
       platform.set_value(&key_path, name, "REG_SZ", command)?;
       Ok(json!(null))
@@ -360,7 +387,11 @@ fn dispatch<P: PlatformProvider>(
     "startup.remove" => {
       let name = req_str(params, "name")?;
       let location = params.get("location").and_then(|v| v.as_str()).unwrap_or("HKCU");
-      let root = if location.to_uppercase() == "HKLM" { "HKLM" } else { "HKCU" };
+      let root = if location.to_uppercase() == "HKLM" {
+        "HKLM"
+      } else {
+        "HKCU"
+      };
       let key_path = format!("{root}\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run");
       platform.delete_value(&key_path, name)?;
       Ok(json!(null))
@@ -432,13 +463,22 @@ fn req_handle(params: &serde_json::Value) -> crate::error::Result<WindowHandle> 
   if let Some(hwnd) = params.get("handle").and_then(|v| v.as_i64()) {
     return Ok(WindowHandle(hwnd));
   }
-  // Fallback: use the foreground window
-  use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
-  let fg = unsafe { GetForegroundWindow() };
-  if fg.is_invalid() {
-    return Err(anyhow::anyhow!("no foreground window and no handle provided"));
+  // Fallback: use the foreground window (Windows only)
+  #[cfg(windows)]
+  {
+    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    let fg = unsafe { GetForegroundWindow() };
+    if fg.is_invalid() {
+      return Err(anyhow::anyhow!("no foreground window and no handle provided"));
+    }
+    Ok(WindowHandle(fg.0 as isize as i64))
   }
-  Ok(WindowHandle(fg.0 as isize as i64))
+  #[cfg(not(windows))]
+  {
+    Err(anyhow::anyhow!(
+      "no handle provided — on this platform a window handle is required"
+    ))
+  }
 }
 
 fn req_str<'a>(params: &'a serde_json::Value, key: &str) -> crate::error::Result<&'a str> {

@@ -75,7 +75,9 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: RegistryAction) -> Result
       let r = executor.call("registry.list_subkeys", json!({"key_path": key}))?;
       if let Some(arr) = r.as_array() {
         for s in arr {
-          if let Some(name) = s.as_str() { println!("{name}"); }
+          if let Some(name) = s.as_str() {
+            println!("{name}");
+          }
         }
       }
     }
@@ -83,11 +85,18 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: RegistryAction) -> Result
       let r = executor.call("registry.list_values", json!({"key_path": key}))?;
       if let Some(arr) = r.as_array() {
         for s in arr {
-          if let Some(name) = s.as_str() { println!("{name}"); }
+          if let Some(name) = s.as_str() {
+            println!("{name}");
+          }
         }
       }
     }
-    RegistryAction::Set { key, name, r#type, data } => {
+    RegistryAction::Set {
+      key,
+      name,
+      r#type,
+      data,
+    } => {
       executor.call(
         "registry.set_value",
         json!({"key_path": key, "value_name": name, "value_type": r#type, "data": data}),

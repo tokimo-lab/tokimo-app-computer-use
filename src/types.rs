@@ -209,13 +209,42 @@ pub enum MouseButton {
 /// System information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemInfo {
+  #[serde(default, skip_serializing_if = "String::is_empty")]
+  pub computer_name: String,
+  #[serde(default, skip_serializing_if = "String::is_empty")]
+  pub username: String,
+  #[serde(default, skip_serializing_if = "String::is_empty")]
+  pub os_version: String,
+  #[serde(default, skip_serializing_if = "String::is_empty")]
   pub locale_name: String,
+  #[serde(default, skip_serializing_if = "String::is_empty")]
+  pub locale: String,
+  #[serde(default, skip_serializing_if = "String::is_empty")]
   pub ui_language: String,
+  #[serde(default)]
   pub major_version: u32,
+  #[serde(default)]
   pub minor_version: u32,
+  #[serde(default)]
   pub build_number: u32,
+  #[serde(default)]
   pub platform_id: u32,
+  #[serde(default, skip_serializing_if = "String::is_empty")]
   pub version_string: String,
+  #[serde(default)]
+  pub screen_width: i32,
+  #[serde(default)]
+  pub screen_height: i32,
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub cpu: Option<CpuInfo>,
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub memory: Option<MemoryInfo>,
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub disks: Vec<DiskInfo>,
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub networks: Vec<NetworkInfo>,
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub battery: Option<BatteryInfo>,
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub gpus: Vec<GpuInfo>,
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -228,6 +257,81 @@ pub struct SystemInfo {
   pub printers: Vec<PrinterInfo>,
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub usbs: Vec<UsbDeviceInfo>,
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub bluetooth_devices: Vec<BluetoothDeviceInfo>,
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub services: Vec<ServiceInfo>,
+}
+
+/// CPU information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CpuInfo {
+  pub name: String,
+  #[serde(default)]
+  pub cores: u32,
+  #[serde(default)]
+  pub logical_processors: u32,
+}
+
+/// Memory information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryInfo {
+  #[serde(default)]
+  pub total_bytes: u64,
+  #[serde(default)]
+  pub available_bytes: u64,
+  #[serde(default)]
+  pub used_bytes: u64,
+  #[serde(default)]
+  pub usage_percent: u32,
+}
+
+/// Disk information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiskInfo {
+  pub drive: String,
+  #[serde(default)]
+  pub total_bytes: u64,
+  #[serde(default)]
+  pub used_bytes: u64,
+  #[serde(default)]
+  pub free_bytes: u64,
+}
+
+/// Network interface information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkInfo {
+  pub name: String,
+  #[serde(default)]
+  pub is_up: bool,
+  #[serde(default, skip_serializing_if = "String::is_empty")]
+  pub mac_address: String,
+  #[serde(default)]
+  pub ip_addresses: Vec<String>,
+}
+
+/// Battery information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatteryInfo {
+  #[serde(default)]
+  pub ac_power: bool,
+  #[serde(default)]
+  pub battery_percent: u32,
+  #[serde(default)]
+  pub battery_life_seconds: u64,
+}
+
+/// Process information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessInfo {
+  pub pid: u32,
+  pub name: String,
+  #[serde(default)]
+  pub thread_count: u32,
+  #[serde(default)]
+  pub parent_pid: u32,
+  #[serde(default)]
+  pub memory_bytes: u64,
 }
 
 /// GPU information

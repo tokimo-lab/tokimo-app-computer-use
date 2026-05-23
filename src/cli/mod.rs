@@ -15,17 +15,19 @@ mod startup;
 mod system;
 mod terminal;
 mod usb;
-mod window;
 mod wifi;
+mod window;
 
 use std::cmp::max;
 use std::fmt::Write as _;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 use serde_json::Value;
 use tokimo_bus_cli::TokimoAuthArgs;
 
+#[cfg(windows)]
+use anyhow::{Context, anyhow};
 #[cfg(windows)]
 use std::io::{BufRead, BufReader, Write};
 
@@ -145,9 +147,7 @@ fn try_connect_or_spawn_daemon() -> Result<PipeClient> {
     }
   }
 
-  Err(anyhow!(
-    "daemon pipe not available after 5s — check daemon logs"
-  ))
+  Err(anyhow!("daemon pipe not available after 5s — check daemon logs"))
 }
 
 #[cfg(windows)]
@@ -157,10 +157,7 @@ fn spawn_daemon_background() -> Result<()> {
   let daemon_path = exe_dir.join("tokimo-app-computer-daemon.exe");
 
   if !daemon_path.exists() {
-    return Err(anyhow!(
-      "daemon binary not found at {}",
-      daemon_path.display()
-    ));
+    return Err(anyhow!("daemon binary not found at {}", daemon_path.display()));
   }
 
   std::process::Command::new(&daemon_path)
@@ -173,8 +170,8 @@ fn spawn_daemon_background() -> Result<()> {
 
 #[cfg(windows)]
 fn is_daemon_running() -> bool {
-  use windows::Win32::System::Diagnostics::ToolHelp::*;
   use windows::Win32::Foundation::CloseHandle;
+  use windows::Win32::System::Diagnostics::ToolHelp::*;
   let target = "tokimo-app-computer-daemon.exe";
   unsafe {
     let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {

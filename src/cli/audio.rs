@@ -55,21 +55,47 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: AudioAction) -> Result<()
     AudioAction::List { r#type } => {
       let r = executor.call("system.info", json!({}))?;
       let audios = r["audio_devices"].as_array();
-      let Some(arr) = audios else { println!("No audio devices found."); return Ok(()) };
-      if arr.is_empty() { println!("No audio devices found."); return Ok(()); }
+      let Some(arr) = audios else {
+        println!("No audio devices found.");
+        return Ok(());
+      };
+      if arr.is_empty() {
+        println!("No audio devices found.");
+        return Ok(());
+      }
       let filter = r#type.as_deref().map(|s| s.to_lowercase());
-      let mut t = super::Table::new(vec![("IDX", 4), ("NAME", 40), ("TYPE", 9), ("VOL", 5), ("MUTE", 4), ("DEFAULT", 7)]);
+      let mut t = super::Table::new(vec![
+        ("IDX", 4),
+        ("NAME", 40),
+        ("TYPE", 9),
+        ("VOL", 5),
+        ("MUTE", 4),
+        ("DEFAULT", 7),
+      ]);
       let mut display_idx = 0usize;
       for (i, a) in arr.iter().enumerate() {
         let dtype = a["device_type"].as_str().unwrap_or("");
         if let Some(ref f) = filter {
-          if dtype != f.as_str() { continue; }
+          if dtype != f.as_str() {
+            continue;
+          }
         }
         let name = a["name"].as_str().unwrap_or("?");
         let vol = a["volume"].as_u64().unwrap_or(0);
         let muted = if a["muted"].as_bool().unwrap_or(false) { "M" } else { "" };
-        let is_default = if a["is_default"].as_bool().unwrap_or(false) { "*" } else { "" };
-        t.row(vec![i.to_string(), name.to_string(), dtype.to_string(), format!("{vol}%"), muted.to_string(), is_default.to_string()]);
+        let is_default = if a["is_default"].as_bool().unwrap_or(false) {
+          "*"
+        } else {
+          ""
+        };
+        t.row(vec![
+          i.to_string(),
+          name.to_string(),
+          dtype.to_string(),
+          format!("{vol}%"),
+          muted.to_string(),
+          is_default.to_string(),
+        ]);
         display_idx += 1;
       }
       if display_idx == 0 {
@@ -80,15 +106,33 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: AudioAction) -> Result<()
     }
     AudioAction::Detail { index } => {
       let r = executor.call("system.info", json!({}))?;
-      let arr = r["audio_devices"].as_array().ok_or_else(|| anyhow::anyhow!("No audio devices found"))?;
-      let a = arr.get(index).ok_or_else(|| anyhow::anyhow!("Audio index {index} out of range"))?;
+      let arr = r["audio_devices"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("No audio devices found"))?;
+      let a = arr
+        .get(index)
+        .ok_or_else(|| anyhow::anyhow!("Audio index {index} out of range"))?;
       super::kv_print(&[
         ("Name:", a["name"].as_str().unwrap_or("?")),
         ("ID:", a["device_id"].as_str().unwrap_or("")),
         ("Type:", a["device_type"].as_str().unwrap_or("")),
         ("Volume:", &format!("{}%", a["volume"].as_u64().unwrap_or(0))),
-        ("Muted:", if a["muted"].as_bool().unwrap_or(false) { "Yes" } else { "No" }),
-        ("Default:", if a["is_default"].as_bool().unwrap_or(false) { "Yes" } else { "No" }),
+        (
+          "Muted:",
+          if a["muted"].as_bool().unwrap_or(false) {
+            "Yes"
+          } else {
+            "No"
+          },
+        ),
+        (
+          "Default:",
+          if a["is_default"].as_bool().unwrap_or(false) {
+            "Yes"
+          } else {
+            "No"
+          },
+        ),
       ]);
     }
     AudioAction::SetVolume { level, index } => {
@@ -127,11 +171,14 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: AudioAction) -> Result<()
     }
     AudioAction::SetDefault { index } => {
       let r = executor.call("system.info", json!({}))?;
-      let arr = r["audio_devices"].as_array()
+      let arr = r["audio_devices"]
+        .as_array()
         .ok_or_else(|| anyhow::anyhow!("No audio devices found"))?;
-      let device = arr.get(index)
+      let device = arr
+        .get(index)
         .ok_or_else(|| anyhow::anyhow!("Audio index {index} out of range"))?;
-      let device_id = device["device_id"].as_str()
+      let device_id = device["device_id"]
+        .as_str()
         .ok_or_else(|| anyhow::anyhow!("Missing device_id"))?;
       executor.call("audio.set_default", json!({"device_id": device_id}))?;
       println!("ok");

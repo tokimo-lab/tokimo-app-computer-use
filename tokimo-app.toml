@@ -5,3 +5,7 @@ description = "Windows desktop automation — mouse, keyboard, windows, elements
 
 [runtime]
 binary = "tokimo-app-computer-use"
+
+[cli]
+name = "tokimo-app-computer-use"
+description = "Desktop automation toolkit — control mouse, keyboard, windows, UI elements, screenshots, and system info."

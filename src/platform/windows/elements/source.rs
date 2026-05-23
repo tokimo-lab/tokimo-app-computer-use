@@ -77,9 +77,10 @@ fn is_interactive(el: &IUIAutomationElement) -> bool {
 fn get_cached_text(el: &IUIAutomationElement, fallback: &str) -> String {
   if let Ok(vp) = unsafe { el.GetCachedPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId) }
     && let Ok(v) = unsafe { vp.CachedValue() }
-      && !v.is_empty() {
-        return v.to_string();
-      }
+    && !v.is_empty()
+  {
+    return v.to_string();
+  }
   if !fallback.is_empty() {
     return fallback.to_string();
   }

@@ -1,8 +1,9 @@
+#![cfg(windows)]
 use std::thread;
 use std::time::Duration;
+use tokimo_app_computer_use::WindowHandle;
 use tokimo_app_computer_use::create_platform;
 use tokimo_app_computer_use::platform::*;
-use tokimo_app_computer_use::WindowHandle;
 
 fn setup() -> impl PlatformProvider + Send + Sync {
   create_platform()
@@ -10,11 +11,7 @@ fn setup() -> impl PlatformProvider + Send + Sync {
 
 /// Launch app, find its window by title, return (pid, handle).
 /// Works with UWP apps where the launcher PID differs from the app PID.
-fn launch_and_get_handle(
-  platform: &dyn PlatformProvider,
-  path: &str,
-  title_pattern: &str,
-) -> (u32, WindowHandle) {
+fn launch_and_get_handle(platform: &dyn PlatformProvider, path: &str, title_pattern: &str) -> (u32, WindowHandle) {
   let _launcher_pid = platform.launch_app(path, 3000).expect("launch app");
   thread::sleep(Duration::from_millis(2000));
 
@@ -36,8 +33,7 @@ fn launch_and_get_handle(
 #[test]
 fn test_calculator_launch_and_find() {
   let platform = setup();
-  let (pid, handle) =
-    launch_and_get_handle(&platform, r"C:\Windows\System32\calc.exe", "Calculator");
+  let (pid, handle) = launch_and_get_handle(&platform, r"C:\Windows\System32\calc.exe", "Calculator");
 
   let xml = platform.get_page_source(&handle).expect("get page source");
   assert!(!xml.is_empty(), "Page source should not be empty");
@@ -52,8 +48,7 @@ fn test_calculator_launch_and_find() {
 #[test]
 fn test_calculator_click_buttons() {
   let platform = setup();
-  let (pid, handle) =
-    launch_and_get_handle(&platform, r"C:\Windows\System32\calc.exe", "Calculator");
+  let (pid, handle) = launch_and_get_handle(&platform, r"C:\Windows\System32\calc.exe", "Calculator");
 
   let result = platform.click_by_xpath(
     &handle,
@@ -78,8 +73,7 @@ fn test_calculator_click_buttons() {
 #[test]
 fn test_calculator_keyboard_input() {
   let platform = setup();
-  let (pid, handle) =
-    launch_and_get_handle(&platform, r"C:\Windows\System32\calc.exe", "Calculator");
+  let (pid, handle) = launch_and_get_handle(&platform, r"C:\Windows\System32\calc.exe", "Calculator");
 
   let result = platform.type_text(&handle, "123", None);
   assert!(result.is_ok(), "Type text should succeed");
@@ -91,12 +85,9 @@ fn test_calculator_keyboard_input() {
 #[test]
 fn test_calculator_screenshot() {
   let platform = setup();
-  let (pid, handle) =
-    launch_and_get_handle(&platform, r"C:\Windows\System32\calc.exe", "Calculator");
+  let (pid, handle) = launch_and_get_handle(&platform, r"C:\Windows\System32\calc.exe", "Calculator");
 
-  let data = platform
-    .take_window_screenshot(&handle, None)
-    .expect("take screenshot");
+  let data = platform.take_window_screenshot(&handle, None).expect("take screenshot");
   assert!(!data.is_empty(), "Screenshot data should not be empty");
   assert!(data.len() > 8, "Screenshot should be at least 8 bytes");
 

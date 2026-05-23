@@ -3,25 +3,25 @@ use crate::platform::*;
 use crate::types::*;
 use ::windows::Win32::Foundation::HWND;
 
+pub mod bluetooth;
 pub mod elements;
 pub mod keyboard;
 pub mod mouse;
 pub mod process;
+pub mod registry;
 pub mod screenshot;
+pub mod service;
 pub mod system_info;
+pub mod terminal;
 pub mod ui_object;
 pub mod wnd;
-pub mod registry;
-pub mod bluetooth;
-pub mod service;
-pub mod terminal;
 
 pub struct WindowsPlatform;
 
 impl Default for WindowsPlatform {
-    fn default() -> Self {
-        Self::new()
-    }
+  fn default() -> Self {
+    Self::new()
+  }
 }
 
 impl WindowsPlatform {
@@ -89,6 +89,10 @@ impl KeyboardControl for WindowsPlatform {
   fn send_keys(&self, keys: &[KeyCode], modifiers: Option<&[KeyCode]>) -> Result<()> {
     keyboard::send_keys(keys.to_vec(), modifiers.map(|m| m.to_vec()))
   }
+  fn send_keys_to_window(&self, _handle: &WindowHandle, keys: &[KeyCode], modifiers: Option<&[KeyCode]>) -> Result<()> {
+    // On Windows, SendInput targets the focused window; just delegate
+    keyboard::send_keys(keys.to_vec(), modifiers.map(|m| m.to_vec()))
+  }
   fn key_down(&self, key: KeyCode) -> Result<()> {
     keyboard::key_down(key)
   }
@@ -112,9 +116,15 @@ impl WindowManager for WindowsPlatform {
       all
         .into_iter()
         .filter(|w| {
-          if w.title.is_empty() { return false; }
-          if wnd::is_system_window(&w.title, &w.process_name) { return false; }
-          if w.width < 100 || w.height < 100 { return false; }
+          if w.title.is_empty() {
+            return false;
+          }
+          if wnd::is_system_window(&w.title, &w.process_name) {
+            return false;
+          }
+          if w.width < 100 || w.height < 100 {
+            return false;
+          }
           let title_match = w.title.to_lowercase().contains(&pat);
           let proc_match = w.process_name.to_lowercase().contains(&pat);
           let pattern_match = title_match || proc_match;
@@ -138,6 +148,14 @@ impl WindowManager for WindowsPlatform {
   }
   fn get_window_title(&self, handle: &WindowHandle) -> Result<String> {
     wnd::get_window_title_by_handle(handle.0)
+  }
+  fn get_foreground_window(&self) -> Result<WindowHandle> {
+    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    let fg = unsafe { GetForegroundWindow() };
+    if fg.is_invalid() {
+      return Err(anyhow::anyhow!("no foreground window"));
+    }
+    Ok(WindowHandle(fg.0 as isize as i64))
   }
   fn focus_window(&self, handle: &WindowHandle) -> Result<()> {
     wnd::bring_window_to_front(HWND(handle.0 as *mut core::ffi::c_void));
@@ -205,6 +223,12 @@ impl ProcessManager for WindowsPlatform {
   }
   fn get_process_ids_by_name(&self, name: &str) -> Result<Vec<u32>> {
     process::get_processes_by_name(name)
+  }
+  fn list_processes(&self) -> Result<Vec<ProcessInfo>> {
+    process::list_processes()
+  }
+  fn get_process_info(&self, pid: u32) -> Result<ProcessInfo> {
+    process::get_process_info(pid)
   }
 }
 

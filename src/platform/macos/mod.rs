@@ -1,3 +1,13 @@
+mod bluetooth;
+mod elements;
+mod keyboard;
+mod mouse;
+mod process;
+mod screenshot;
+mod system_info;
+mod terminal;
+mod window;
+
 use crate::error::Result;
 use crate::platform::*;
 use crate::types::*;
@@ -5,237 +15,332 @@ use crate::types::*;
 pub struct MacPlatform;
 
 impl Default for MacPlatform {
-    fn default() -> Self {
-        Self::new()
-    }
+  fn default() -> Self {
+    Self::new()
+  }
 }
 
 impl MacPlatform {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-macro_rules! not_impl {
-    () => {
-        Err(anyhow::anyhow!("not yet implemented for macOS"))
-    };
+  pub fn new() -> Self {
+    Self
+  }
 }
 
 // === MouseControl ===
 impl MouseControl for MacPlatform {
-    fn move_cursor(&self, _x: i32, _y: i32) -> Result<()> {
-        not_impl!()
-    }
-    fn get_cursor_position(&self) -> Result<(i32, i32)> {
-        not_impl!()
-    }
-    fn click(&self, _handle: &WindowHandle, _x: f64, _y: f64, _button: MouseButton, _double_click: bool) -> Result<InputResult> {
-        not_impl!()
-    }
-    fn click_by_xpath(&self, _handle: &WindowHandle, _xpath: &str, _button: MouseButton, _double_click: bool) -> Result<InputResult> {
-        not_impl!()
-    }
-    fn drag(&self, _handle: &WindowHandle, _from_x: f64, _from_y: f64, _to_x: f64, _to_y: f64, _button: MouseButton) -> Result<InputResult> {
-        not_impl!()
-    }
-    fn scroll(&self, _handle: &WindowHandle, _x: f64, _y: f64, _delta_x: i32, _delta_y: i32) -> Result<InputResult> {
-        not_impl!()
-    }
+  fn move_cursor(&self, x: i32, y: i32) -> Result<()> {
+    mouse::move_cursor(x, y)
+  }
+  fn get_cursor_position(&self) -> Result<(i32, i32)> {
+    mouse::get_cursor_position()
+  }
+  fn click(
+    &self,
+    handle: &WindowHandle,
+    x: f64,
+    y: f64,
+    button: MouseButton,
+    double_click: bool,
+  ) -> Result<InputResult> {
+    mouse::click(handle, x, y, button, double_click)
+  }
+  fn click_by_xpath(
+    &self,
+    handle: &WindowHandle,
+    xpath: &str,
+    button: MouseButton,
+    double_click: bool,
+  ) -> Result<InputResult> {
+    let elem = elements::find_first_element_by_xpath(handle, xpath)?;
+    let pos = elem.pos(Some(handle))?;
+    // Activate window first, then click at screen coords (same as Windows)
+    window::focus_window(handle)?;
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let wins = crate::platform::macos::window::list_windows()?;
+    let win = wins.iter().find(|w| w.hwnd == handle.0);
+    let rel_x = pos.center_x - win.map(|w| w.x).unwrap_or(0);
+    let rel_y = pos.center_y - win.map(|w| w.y).unwrap_or(0);
+    mouse::click(handle, rel_x as f64, rel_y as f64, button, double_click)?;
+    Ok(InputResult::success(pos.center_x, pos.center_y, rel_x, rel_y))
+  }
+  fn drag(
+    &self,
+    handle: &WindowHandle,
+    from_x: f64,
+    from_y: f64,
+    to_x: f64,
+    to_y: f64,
+    button: MouseButton,
+  ) -> Result<InputResult> {
+    mouse::drag(handle, from_x, from_y, to_x, to_y, button)
+  }
+  fn scroll(&self, handle: &WindowHandle, x: f64, y: f64, delta_x: i32, delta_y: i32) -> Result<InputResult> {
+    mouse::scroll(handle, x, y, delta_x, delta_y)
+  }
 }
 
 // === KeyboardControl ===
 impl KeyboardControl for MacPlatform {
-    fn type_text(&self, _handle: &WindowHandle, _text: &str, _position: Option<&InputPosition>) -> Result<InputResult> {
-        not_impl!()
+  fn type_text(&self, handle: &WindowHandle, text: &str, position: Option<&InputPosition>) -> Result<InputResult> {
+    keyboard::type_text(handle, text, position)
+  }
+  fn type_text_by_xpath(&self, handle: &WindowHandle, xpath: &str, text: &str) -> Result<InputResult> {
+    let elem = elements::find_first_element_by_xpath(handle, xpath)?;
+    let pos = elem.pos(Some(handle))?;
+    // Try AX set_value first (same as Windows)
+    if elem.can_set_value().unwrap_or(false) && elem.set_value(text) {
+      return Ok(InputResult::success(pos.center_x, pos.center_y, 0, 0));
     }
-    fn type_text_by_xpath(&self, _handle: &WindowHandle, _xpath: &str, _text: &str) -> Result<InputResult> {
-        not_impl!()
-    }
-    fn type_text_raw(&self, _handle: &WindowHandle, _text: &str) -> Result<()> {
-        not_impl!()
-    }
-    fn send_keys(&self, _keys: &[KeyCode], _modifiers: Option<&[KeyCode]>) -> Result<()> {
-        not_impl!()
-    }
-    fn key_down(&self, _key: KeyCode) -> Result<()> {
-        not_impl!()
-    }
-    fn key_release(&self, _key: KeyCode) -> Result<()> {
-        not_impl!()
-    }
+    // Fallback: activate window, click element, type via CGEvent (same pattern as Windows)
+    window::focus_window(handle)?;
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let wins = crate::platform::macos::window::list_windows()?;
+    let win = wins.iter().find(|w| w.hwnd == handle.0);
+    let rel_x = pos.center_x - win.map(|w| w.x).unwrap_or(0);
+    let rel_y = pos.center_y - win.map(|w| w.y).unwrap_or(0);
+    mouse::click(handle, rel_x as f64, rel_y as f64, crate::types::MouseButton::Left, false)?;
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    keyboard::type_text(handle, text, None)?;
+    Ok(InputResult::success(pos.center_x, pos.center_y, 0, 0))
+  }
+  fn type_text_raw(&self, handle: &WindowHandle, text: &str) -> Result<()> {
+    keyboard::type_text_raw(handle, text)
+  }
+  fn send_keys(&self, keys: &[KeyCode], modifiers: Option<&[KeyCode]>) -> Result<()> {
+    keyboard::send_keys(keys, modifiers)
+  }
+  fn send_keys_to_window(&self, handle: &WindowHandle, keys: &[KeyCode], modifiers: Option<&[KeyCode]>) -> Result<()> {
+    let wins = crate::platform::macos::window::list_windows()?;
+    let win = wins.iter().find(|w| w.hwnd == handle.0)
+      .ok_or_else(|| anyhow::anyhow!("window not found: {}", handle.0))?;
+    keyboard::send_keys_to_pid(win.process_id as i32, keys, modifiers)
+  }
+  fn key_down(&self, key: KeyCode) -> Result<()> {
+    keyboard::key_down(key)
+  }
+  fn key_release(&self, key: KeyCode) -> Result<()> {
+    keyboard::key_release(key)
+  }
 }
 
 // === WindowManager ===
 impl WindowManager for MacPlatform {
-    fn list_windows(&self) -> Result<Vec<WindowInfo>> {
-        not_impl!()
+  fn list_windows(&self) -> Result<Vec<WindowInfo>> {
+    window::list_windows()
+  }
+  fn list_visible_windows(&self) -> Result<Vec<WindowInfo>> {
+    window::list_visible_windows()
+  }
+  fn find_windows_by_title(&self, pattern: &str, process_name: Option<&str>) -> Result<Vec<WindowInfo>> {
+    window::find_windows_by_title(pattern, process_name)
+  }
+  fn find_window_by_title(&self, title: &str) -> Result<WindowHandle> {
+    window::find_window_by_title(title)
+  }
+  fn get_windows_by_process_id(&self, pid: u32) -> Result<Vec<WindowInfo>> {
+    window::get_windows_by_process_id(pid)
+  }
+  fn get_windows_by_process_id_with_title(&self, pid: u32, pattern: &str, fuzzy: bool) -> Result<Vec<WindowInfo>> {
+    window::get_windows_by_process_id_with_title(pid, pattern, fuzzy)
+  }
+  fn get_child_windows(&self, parent: &WindowHandle) -> Result<Vec<WindowInfo>> {
+    // Get child windows by finding the parent's PID and filtering windows
+    let wins = window::list_windows()?;
+    if let Some(parent_win) = wins.iter().find(|w| w.hwnd == parent.0) {
+      let pid = parent_win.process_id;
+      // Return all windows of the same process except the parent
+      Ok(
+        wins
+          .into_iter()
+          .filter(|w| w.process_id == pid && w.hwnd != parent.0)
+          .collect(),
+      )
+    } else {
+      Ok(Vec::new())
     }
-    fn list_visible_windows(&self) -> Result<Vec<WindowInfo>> {
-        not_impl!()
-    }
-    fn find_windows_by_title(&self, _pattern: &str, _process_name: Option<&str>) -> Result<Vec<WindowInfo>> {
-        not_impl!()
-    }
-    fn find_window_by_title(&self, _title: &str) -> Result<WindowHandle> {
-        not_impl!()
-    }
-    fn get_windows_by_process_id(&self, _pid: u32) -> Result<Vec<WindowInfo>> {
-        not_impl!()
-    }
-    fn get_windows_by_process_id_with_title(&self, _pid: u32, _pattern: &str, _fuzzy: bool) -> Result<Vec<WindowInfo>> {
-        not_impl!()
-    }
-    fn get_child_windows(&self, _parent: &WindowHandle) -> Result<Vec<WindowInfo>> {
-        not_impl!()
-    }
-    fn get_window_title(&self, _handle: &WindowHandle) -> Result<String> {
-        not_impl!()
-    }
-    fn focus_window(&self, _handle: &WindowHandle) -> Result<()> {
-        not_impl!()
-    }
-    fn move_window(&self, _handle: &WindowHandle, _x: i32, _y: i32) -> Result<()> {
-        not_impl!()
-    }
-    fn resize_window(&self, _handle: &WindowHandle, _width: i32, _height: i32) -> Result<()> {
-        not_impl!()
-    }
-    fn set_window_rect(&self, _handle: &WindowHandle, _x: i32, _y: i32, _width: i32, _height: i32) -> Result<()> {
-        not_impl!()
-    }
-    fn minimize_window(&self, _handle: &WindowHandle) -> Result<()> {
-        not_impl!()
-    }
-    fn maximize_window(&self, _handle: &WindowHandle) -> Result<()> {
-        not_impl!()
-    }
-    fn restore_window(&self, _handle: &WindowHandle) -> Result<()> {
-        not_impl!()
-    }
-    fn get_foreground_window(&self) -> Result<WindowHandle> {
-        not_impl!()
-    }
+  }
+  fn get_window_title(&self, handle: &WindowHandle) -> Result<String> {
+    window::get_window_title(handle)
+  }
+  fn get_foreground_window(&self) -> Result<WindowHandle> {
+    window::get_foreground_window()
+  }
+  fn focus_window(&self, handle: &WindowHandle) -> Result<()> {
+    window::focus_window(handle)
+  }
+  fn move_window(&self, handle: &WindowHandle, x: i32, y: i32) -> Result<()> {
+    window::move_window(handle, x, y)
+  }
+  fn resize_window(&self, handle: &WindowHandle, width: i32, height: i32) -> Result<()> {
+    window::resize_window(handle, width, height)
+  }
+  fn set_window_rect(&self, handle: &WindowHandle, x: i32, y: i32, width: i32, height: i32) -> Result<()> {
+    window::set_window_rect(handle, x, y, width, height)
+  }
+  fn minimize_window(&self, handle: &WindowHandle) -> Result<()> {
+    window::minimize_window(handle)
+  }
+  fn maximize_window(&self, handle: &WindowHandle) -> Result<()> {
+    window::maximize_window(handle)
+  }
+  fn restore_window(&self, handle: &WindowHandle) -> Result<()> {
+    window::restore_window(handle)
+  }
 }
 
 // === ElementFinder ===
 impl ElementFinder for MacPlatform {
-    fn find_elements_by_xpath(&self, _handle: &WindowHandle, _xpath: &str) -> Result<Vec<Box<dyn Element>>> {
-        not_impl!()
-    }
-    fn find_first_element_by_xpath(&self, _handle: &WindowHandle, _xpath: &str) -> Result<Box<dyn Element>> {
-        not_impl!()
-    }
+  fn find_elements_by_xpath(&self, handle: &WindowHandle, xpath: &str) -> Result<Vec<Box<dyn Element>>> {
+    elements::find_elements_by_xpath(handle, xpath)
+  }
+  fn find_first_element_by_xpath(&self, handle: &WindowHandle, xpath: &str) -> Result<Box<dyn Element>> {
+    elements::find_first_element_by_xpath(handle, xpath)
+  }
 }
 
 // === UiTreeInspector ===
 impl UiTreeInspector for MacPlatform {
-    fn get_page_source(&self, _handle: &WindowHandle) -> Result<String> {
-        not_impl!()
-    }
+  fn get_page_source(&self, handle: &WindowHandle) -> Result<String> {
+    elements::get_page_source(handle)
+  }
 }
 
 // === ScreenCapture ===
 impl ScreenCapture for MacPlatform {
-    fn take_desktop_screenshot(&self, _config: Option<&ScreenshotConfig>) -> Result<Vec<u8>> {
-        not_impl!()
-    }
-    fn take_window_screenshot(&self, _handle: &WindowHandle, _config: Option<&ScreenshotConfig>) -> Result<Vec<u8>> {
-        not_impl!()
-    }
+  fn take_desktop_screenshot(&self, config: Option<&ScreenshotConfig>) -> Result<Vec<u8>> {
+    screenshot::take_desktop_screenshot(config)
+  }
+  fn take_window_screenshot(&self, handle: &WindowHandle, _config: Option<&ScreenshotConfig>) -> Result<Vec<u8>> {
+    screenshot::take_window_screenshot(handle)
+  }
 }
 
 // === ProcessManager ===
 impl ProcessManager for MacPlatform {
-    fn launch_app(&self, _path: &str, _wait_timeout_ms: u32) -> Result<u32> {
-        not_impl!()
-    }
-    fn terminate_app(&self, _pid: u32) -> Result<bool> {
-        not_impl!()
-    }
-    fn terminate_apps_by_name(&self, _name: &str) -> Result<(u32, u32)> {
-        not_impl!()
-    }
-    fn get_process_ids_by_name(&self, _name: &str) -> Result<Vec<u32>> {
-        not_impl!()
-    }
-    fn list_processes(&self) -> Result<Vec<ProcessInfo>> {
-        not_impl!()
-    }
-    fn get_process_info(&self, _pid: u32) -> Result<ProcessInfo> {
-        not_impl!()
-    }
-}
-
-// === TerminalExecutor ===
-impl TerminalExecutor for MacPlatform {
-    fn execute_command(&self, _shell_type: &str, _command: &str) -> Result<TerminalResult> {
-        not_impl!()
-    }
+  fn launch_app(&self, path: &str, wait_timeout_ms: u32) -> Result<u32> {
+    process::launch_app(path, wait_timeout_ms)
+  }
+  fn terminate_app(&self, pid: u32) -> Result<bool> {
+    process::terminate_app(pid)
+  }
+  fn terminate_apps_by_name(&self, name: &str) -> Result<(u32, u32)> {
+    process::terminate_apps_by_name(name)
+  }
+  fn get_process_ids_by_name(&self, name: &str) -> Result<Vec<u32>> {
+    process::get_process_ids_by_name(name)
+  }
+  fn list_processes(&self) -> Result<Vec<ProcessInfo>> {
+    process::list_processes()
+  }
+  fn get_process_info(&self, pid: u32) -> Result<ProcessInfo> {
+    process::get_process_info(pid)
+  }
 }
 
 // === SystemInfoProvider ===
 impl SystemInfoProvider for MacPlatform {
-    fn get_system_info(&self) -> Result<SystemInfo> {
-        Ok(SystemInfo {
-            computer_name: "macOS".to_string(),
-            username: std::env::var("USER").unwrap_or_default(),
-            os_version: std::env::consts::OS.to_string(),
-            locale: String::new(),
-            ui_language: String::new(),
-            cpu: CpuInfo { name: String::new(), cores: 0, logical_processors: 0 },
-            memory: MemoryInfo { total_bytes: 0, available_bytes: 0, used_bytes: 0, usage_percent: 0 },
-            disks: Vec::new(),
-            networks: Vec::new(),
-            screen_width: 0,
-            screen_height: 0,
-            battery: None,
-            gpus: Vec::new(),
-            usbs: Vec::new(),
-            bluetooth_devices: Vec::new(),
-            wifi_networks: Vec::new(),
-            audio_devices: Vec::new(),
-            printers: Vec::new(),
-            services: Vec::new(),
-            startup_entries: Vec::new(),
-        })
-    }
-    fn get_screen_size(&self) -> Result<(i32, i32)> {
-        not_impl!()
-    }
-    fn list_printers(&self) -> Result<Vec<PrinterInfo>> {
-        not_impl!()
-    }
-    fn print_document(&self, _file_path: &str, _printer_name: &str) -> Result<()> {
-        not_impl!()
-    }
+  fn get_system_info(&self) -> Result<SystemInfo> {
+    system_info::get_system_info()
+  }
+  fn get_screen_size(&self) -> Result<(i32, i32)> {
+    system_info::get_screen_size()
+  }
+  fn list_printers(&self) -> Result<Vec<PrinterInfo>> {
+    system_info::list_printers()
+  }
+  fn print_document(&self, file_path: &str, printer_name: &str) -> Result<()> {
+    system_info::print_document(file_path, printer_name)
+  }
 }
 
-// === ServiceManager ===
-impl ServiceManager for MacPlatform {
-    fn list_services(&self) -> Result<Vec<ServiceInfo>> {
-        not_impl!()
-    }
-    fn get_service_detail(&self, _name: &str) -> Result<ServiceInfo> {
-        not_impl!()
-    }
-    fn start_service(&self, _name: &str) -> Result<()> {
-        not_impl!()
-    }
-    fn stop_service(&self, _name: &str) -> Result<()> {
-        not_impl!()
-    }
+// === BluetoothProvider ===
+impl BluetoothProvider for MacPlatform {
+  fn scan_classic(&self) -> Result<Vec<BluetoothDeviceInfo>> {
+    // macOS doesn't expose classic BT scanning via API
+    Ok(Vec::new())
+  }
+  fn scan_ble(&self, duration_ms: u64) -> Result<Vec<BluetoothDeviceInfo>> {
+    bluetooth::scan_ble(duration_ms)
+  }
+  fn list_pnp(&self) -> Result<Vec<BluetoothDeviceInfo>> {
+    system_info::list_bluetooth_devices()
+  }
 }
 
-// === BluetoothManager ===
-impl BluetoothManager for MacPlatform {
-    fn scan_bluetooth_devices(&self) -> Result<Vec<BluetoothDeviceInfo>> {
-        not_impl!()
-    }
-    fn scan_bluetooth_ble(&self, _duration_ms: u64) -> Result<Vec<BluetoothDeviceInfo>> {
-        not_impl!()
-    }
-    fn list_pnp_bluetooth(&self) -> Result<Vec<BluetoothDeviceInfo>> {
-        not_impl!()
-    }
+// === ServiceProvider ===
+impl ServiceProvider for MacPlatform {
+  fn list_services(&self) -> Result<Vec<ServiceInfo>> {
+    system_info::list_services()
+  }
+  fn get_service_detail(&self, name: &str) -> Result<ServiceInfo> {
+    system_info::get_service_detail(name)
+  }
+  fn start_service(&self, name: &str) -> Result<()> {
+    system_info::start_service(name)
+  }
+  fn stop_service(&self, name: &str) -> Result<()> {
+    system_info::stop_service(name)
+  }
+  fn restart_service(&self, name: &str) -> Result<()> {
+    system_info::stop_service(name)?;
+    system_info::start_service(name)
+  }
+}
+
+// === TerminalProvider ===
+impl TerminalProvider for MacPlatform {
+  fn execute_command(&self, shell_type: &str, command: &str) -> Result<TerminalResult> {
+    terminal::execute_command(shell_type, command)
+  }
+}
+
+// === RegistryProvider ===
+impl RegistryProvider for MacPlatform {
+  fn read_value(&self, _key_path: &str, _value_name: Option<&str>) -> Result<(String, String)> {
+    Err(anyhow::anyhow!("registry not available on macOS"))
+  }
+  fn list_subkeys(&self, _key_path: &str) -> Result<Vec<String>> {
+    Err(anyhow::anyhow!("registry not available on macOS"))
+  }
+  fn list_values(&self, _key_path: &str) -> Result<Vec<String>> {
+    Err(anyhow::anyhow!("registry not available on macOS"))
+  }
+  fn set_value(&self, _key_path: &str, _value_name: &str, _value_type: &str, _data: &str) -> Result<()> {
+    Err(anyhow::anyhow!("registry not available on macOS"))
+  }
+  fn create_key(&self, _key_path: &str) -> Result<()> {
+    Err(anyhow::anyhow!("registry not available on macOS"))
+  }
+  fn delete_value(&self, _key_path: &str, _value_name: &str) -> Result<()> {
+    Err(anyhow::anyhow!("registry not available on macOS"))
+  }
+  fn delete_key(&self, _key_path: &str) -> Result<()> {
+    Err(anyhow::anyhow!("registry not available on macOS"))
+  }
+}
+
+// === SoftwareProvider ===
+impl SoftwareProvider for MacPlatform {
+  fn get_installed_software(&self) -> Result<Vec<SoftwareInfo>> {
+    system_info::get_installed_software()
+  }
+}
+
+// === AudioControl ===
+impl AudioControl for MacPlatform {
+  fn set_volume(&self, _device_index: Option<usize>, level: u32) -> Result<()> {
+    system_info::set_volume(level)
+  }
+  fn get_volume(&self, _device_index: Option<usize>) -> Result<u32> {
+    system_info::get_volume()
+  }
+  fn set_mute(&self, _device_index: Option<usize>, muted: bool) -> Result<()> {
+    system_info::set_mute(muted)
+  }
+  fn get_mute(&self, _device_index: Option<usize>) -> Result<bool> {
+    system_info::get_mute()
+  }
+  fn set_default_device(&self, device_id: &str) -> Result<()> {
+    system_info::set_default_device(device_id)
+  }
 }

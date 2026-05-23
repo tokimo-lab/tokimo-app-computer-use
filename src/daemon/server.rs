@@ -1,8 +1,5 @@
-use std::io::{BufRead, BufReader, Write};
 use std::sync::Arc;
 
-use super::handler::handle_request;
-use super::protocol::Request;
 use crate::platform::PlatformProvider;
 
 /// IPC pipe name on Windows

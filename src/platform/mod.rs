@@ -1,3 +1,5 @@
+#[cfg(target_os = "macos")]
+pub mod macos;
 #[cfg(windows)]
 pub mod windows;
 
@@ -47,6 +49,7 @@ pub trait KeyboardControl {
   /// Does not search for UIA elements — works with any app including Qt/Electron.
   fn type_text_raw(&self, handle: &WindowHandle, text: &str) -> Result<()>;
   fn send_keys(&self, keys: &[KeyCode], modifiers: Option<&[KeyCode]>) -> Result<()>;
+  fn send_keys_to_window(&self, handle: &WindowHandle, keys: &[KeyCode], modifiers: Option<&[KeyCode]>) -> Result<()>;
   fn key_down(&self, key: KeyCode) -> Result<()>;
   fn key_release(&self, key: KeyCode) -> Result<()>;
 }
@@ -63,6 +66,7 @@ pub trait WindowManager {
   fn get_windows_by_process_id_with_title(&self, pid: u32, pattern: &str, fuzzy: bool) -> Result<Vec<WindowInfo>>;
   fn get_child_windows(&self, parent: &WindowHandle) -> Result<Vec<WindowInfo>>;
   fn get_window_title(&self, handle: &WindowHandle) -> Result<String>;
+  fn get_foreground_window(&self) -> Result<WindowHandle>;
   fn focus_window(&self, handle: &WindowHandle) -> Result<()>;
   fn move_window(&self, handle: &WindowHandle, x: i32, y: i32) -> Result<()>;
   fn resize_window(&self, handle: &WindowHandle, width: i32, height: i32) -> Result<()>;
@@ -95,6 +99,7 @@ pub trait Element: Send {
   fn set_range_value(&self, value: f64) -> Result<()>;
   fn focus(&self) -> Result<()>;
   fn is_focused(&self) -> Result<bool>;
+  fn confirm(&self) -> Result<()>;
   fn to_xml(&self, indent: usize) -> String;
 }
 
@@ -129,6 +134,8 @@ pub trait ProcessManager {
   fn terminate_app(&self, pid: u32) -> Result<bool>;
   fn terminate_apps_by_name(&self, name: &str) -> Result<(u32, u32)>;
   fn get_process_ids_by_name(&self, name: &str) -> Result<Vec<u32>>;
+  fn list_processes(&self) -> Result<Vec<ProcessInfo>>;
+  fn get_process_info(&self, pid: u32) -> Result<ProcessInfo>;
 }
 
 // ============================================================

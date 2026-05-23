@@ -66,11 +66,14 @@ pub fn scan_ble(duration_ms: u64) -> Result<Vec<BluetoothDeviceInfo>> {
     move |_sender, args| {
       if let Some(args) = args.as_ref() {
         let addr_u64 = args.BluetoothAddress().unwrap_or(0);
-        if addr_u64 == 0 { return Ok(()); }
+        if addr_u64 == 0 {
+          return Ok(());
+        }
 
         let address = format_bt_addr_u64(addr_u64);
         let rssi = args.RawSignalStrengthInDBm().ok();
-        let name = args.Advertisement()
+        let name = args
+          .Advertisement()
           .and_then(|adv| adv.LocalName())
           .map(|s| s.to_string())
           .unwrap_or_default();
@@ -125,8 +128,7 @@ pub fn list_pnp() -> Result<Vec<BluetoothDeviceInfo>> {
   let mut devices = Vec::new();
 
   // Handle both single object and array
-  let json_val: serde_json::Value = serde_json::from_str(stdout)
-    .unwrap_or(serde_json::Value::Null);
+  let json_val: serde_json::Value = serde_json::from_str(stdout).unwrap_or(serde_json::Value::Null);
 
   let arr = match &json_val {
     serde_json::Value::Array(a) => a.clone(),
@@ -143,9 +145,15 @@ pub fn list_pnp() -> Result<Vec<BluetoothDeviceInfo>> {
     let address = if let Some(pos) = instance_id.rfind("DEV_") {
       let hex = &instance_id[pos + 4..pos + 16];
       if hex.len() == 12 {
-        format!("{}:{}:{}:{}:{}:{}",
-          &hex[0..2], &hex[2..4], &hex[4..6],
-          &hex[6..8], &hex[8..10], &hex[10..12])
+        format!(
+          "{}:{}:{}:{}:{}:{}",
+          &hex[0..2],
+          &hex[2..4],
+          &hex[4..6],
+          &hex[6..8],
+          &hex[8..10],
+          &hex[10..12]
+        )
       } else {
         String::new()
       }
@@ -182,10 +190,16 @@ fn bt_name(info: &BLUETOOTH_DEVICE_INFO) -> String {
 
 fn format_bt_address(addr: &BLUETOOTH_ADDRESS) -> String {
   let b = unsafe { addr.Anonymous.rgBytes };
-  format!("{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}", b[5], b[4], b[3], b[2], b[1], b[0])
+  format!(
+    "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+    b[5], b[4], b[3], b[2], b[1], b[0]
+  )
 }
 
 fn format_bt_addr_u64(addr: u64) -> String {
   let b = addr.to_le_bytes();
-  format!("{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}", b[5], b[4], b[3], b[2], b[1], b[0])
+  format!(
+    "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+    b[5], b[4], b[3], b[2], b[1], b[0]
+  )
 }

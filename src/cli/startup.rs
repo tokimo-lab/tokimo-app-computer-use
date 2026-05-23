@@ -33,8 +33,14 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: StartupAction) -> Result<
     StartupAction::List => {
       let r = executor.call("system.info", json!({}))?;
       let startups = r["startup_entries"].as_array();
-      let Some(arr) = startups else { println!("No startup entries found."); return Ok(()) };
-      if arr.is_empty() { println!("No startup entries found."); return Ok(()); }
+      let Some(arr) = startups else {
+        println!("No startup entries found.");
+        return Ok(());
+      };
+      if arr.is_empty() {
+        println!("No startup entries found.");
+        return Ok(());
+      }
       let mut t = super::Table::new(vec![("NAME", 42), ("LOCATION", 10), ("COMMAND", 40)]);
       for s in arr {
         let name = s["name"].as_str().unwrap_or("?");
@@ -44,19 +50,29 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: StartupAction) -> Result<
       }
       t.print();
     }
-    StartupAction::Add { name, command, location } => {
-      executor.call("startup.add", json!({
-        "name": name,
-        "command": command,
-        "location": location,
-      }))?;
+    StartupAction::Add {
+      name,
+      command,
+      location,
+    } => {
+      executor.call(
+        "startup.add",
+        json!({
+          "name": name,
+          "command": command,
+          "location": location,
+        }),
+      )?;
       println!("ok");
     }
     StartupAction::Remove { name, location } => {
-      executor.call("startup.remove", json!({
-        "name": name,
-        "location": location,
-      }))?;
+      executor.call(
+        "startup.remove",
+        json!({
+          "name": name,
+          "location": location,
+        }),
+      )?;
       println!("ok");
     }
   }

@@ -142,7 +142,13 @@ fn get_display_name(sc_manager: SC_HANDLE, service_name: &str) -> Option<String>
       return None;
     }
     let mut buffer = vec![0u8; needed as usize];
-    QueryServiceConfigW(service, Some(buffer.as_mut_ptr() as *mut QUERY_SERVICE_CONFIGW), needed, &mut needed).ok()?;
+    QueryServiceConfigW(
+      service,
+      Some(buffer.as_mut_ptr() as *mut QUERY_SERVICE_CONFIGW),
+      needed,
+      &mut needed,
+    )
+    .ok()?;
     let config = &*(buffer.as_ptr() as *const QUERY_SERVICE_CONFIGW);
     Some(config.lpDisplayName.to_string().unwrap_or_default())
   }

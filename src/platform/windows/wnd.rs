@@ -330,9 +330,10 @@ unsafe extern "system" fn enum_by_process_proc(hwnd: HWND, lparam: LPARAM) -> BO
     GetWindowThreadProcessId(hwnd, Some(&mut pid));
     if pid == data.process_id {
       if let Some(p) = data.pattern
-        && !get_window_title(hwnd).to_lowercase().contains(&p.to_lowercase()) {
-          return true.into();
-        }
+        && !get_window_title(hwnd).to_lowercase().contains(&p.to_lowercase())
+      {
+        return true.into();
+      }
       data.windows.push(hwnd);
     }
     true.into()

@@ -6,39 +6,72 @@ use super::{CommandExecutor, print_input_result};
 
 #[derive(Subcommand, Debug)]
 pub enum KeyboardAction {
-  Type { text: String, #[arg(long, short = 'w')] handle: Option<i64>, #[arg(long)] x: Option<f64>, #[arg(long)] y: Option<f64> },
-  TypeXpath { xpath: String, text: String, #[arg(long, short = 'w')] handle: Option<i64> },
-  TypeRaw { text: String, #[arg(long, short = 'w')] handle: Option<i64> },
-  SendKeys { keys: String },
-  KeyDown { key: String },
-  KeyUp { key: String },
+  Type {
+    text: String,
+    #[arg(long, short = 'w')]
+    handle: Option<i64>,
+    #[arg(long)]
+    x: Option<f64>,
+    #[arg(long)]
+    y: Option<f64>,
+  },
+  TypeXpath {
+    xpath: String,
+    text: String,
+    #[arg(long, short = 'w')]
+    handle: Option<i64>,
+  },
+  TypeRaw {
+    text: String,
+    #[arg(long, short = 'w')]
+    handle: Option<i64>,
+  },
+  SendKeys {
+    keys: String,
+  },
+  KeyDown {
+    key: String,
+  },
+  KeyUp {
+    key: String,
+  },
 }
 
 pub fn cmd(executor: &mut dyn CommandExecutor, action: KeyboardAction) -> Result<()> {
   match action {
     KeyboardAction::Type { handle, text, x, y } => {
       let mut params = json!({"text": text});
-      if let Some(h) = handle { params["handle"] = json!(h); }
-      if let (Some(px), Some(py)) = (x, y) { params["position"] = json!({"x": px, "y": py}); }
+      if let Some(h) = handle {
+        params["handle"] = json!(h);
+      }
+      if let (Some(px), Some(py)) = (x, y) {
+        params["position"] = json!({"x": px, "y": py});
+      }
       let r = executor.call("keyboard.type_text", params)?;
       print_input_result(&r);
     }
     KeyboardAction::TypeXpath { handle, xpath, text } => {
       let mut params = json!({"xpath": xpath, "text": text});
-      if let Some(h) = handle { params["handle"] = json!(h); }
+      if let Some(h) = handle {
+        params["handle"] = json!(h);
+      }
       let r = executor.call("keyboard.type_text_by_xpath", params)?;
       print_input_result(&r);
     }
     KeyboardAction::TypeRaw { handle, text } => {
       let mut params = json!({"text": text});
-      if let Some(h) = handle { params["handle"] = json!(h); }
+      if let Some(h) = handle {
+        params["handle"] = json!(h);
+      }
       executor.call("keyboard.type_raw", params)?;
       println!("ok");
     }
     KeyboardAction::SendKeys { keys } => {
       let (key_codes, modifiers) = parse_key_combo(&keys)?;
       let mut params = json!({"keys": key_codes});
-      if !modifiers.is_empty() { params["modifiers"] = json!(modifiers); }
+      if !modifiers.is_empty() {
+        params["modifiers"] = json!(modifiers);
+      }
       executor.call("keyboard.send_keys", params)?;
       println!("ok");
     }
@@ -62,11 +95,16 @@ fn parse_key_combo(input: &str) -> Result<(Vec<String>, Vec<String>)> {
   let mut main_keys = Vec::new();
   for part in &parts {
     let normalized = normalize_key_name(part);
-    if is_modifier(&normalized) { modifiers.push(normalized); }
-    else { main_keys.push(normalized); }
+    if is_modifier(&normalized) {
+      modifiers.push(normalized);
+    } else {
+      main_keys.push(normalized);
+    }
   }
   if main_keys.is_empty() {
-    if let Some(last) = modifiers.pop() { main_keys.push(last); }
+    if let Some(last) = modifiers.pop() {
+      main_keys.push(last);
+    }
   }
   Ok((main_keys, modifiers))
 }
@@ -111,5 +149,8 @@ fn normalize_key_name(name: &str) -> String {
 }
 
 fn is_modifier(name: &str) -> bool {
-  matches!(name, "Ctrl" | "LCtrl" | "RCtrl" | "Shift" | "LShift" | "RShift" | "Alt" | "LAlt" | "RAlt" | "Win" | "LWin" | "RWin")
+  matches!(
+    name,
+    "Ctrl" | "LCtrl" | "RCtrl" | "Shift" | "LShift" | "RShift" | "Alt" | "LAlt" | "RAlt" | "Win" | "LWin" | "RWin"
+  )
 }

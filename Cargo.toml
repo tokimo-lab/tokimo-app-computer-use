@@ -63,6 +63,42 @@ windows = { version = "0.62", features = [
     "Foundation"
 ] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# libc (statvfs, getifaddrs, host_statistics64, proc_pidinfo)
+libc = "0.2"
+
+# Core Graphics (CGEvent for mouse/keyboard)
+core-graphics = "0.25"
+
+# ScreenCaptureKit (replaces deprecated CGDisplayCreateImage, CGWindowListCreateImage, CGWindowListCopyWindowInfo)
+objc2-screen-capture-kit = { version = "0.3", features = ["SCShareableContent", "SCScreenshotManager", "SCStream"] }
+objc2-core-graphics = "0.3"
+core-foundation = "0.10"
+core-foundation-sys = "0.8"
+
+# Accessibility API (AXUIElement for UI automation, window manipulation)
+accessibility = "0.2"
+accessibility-sys = "0.2"
+
+# Objective-C runtime (for NSWorkspace, NSRunningApplication)
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = "0.3"
+objc2-core-foundation = { version = "0.3", features = ["CFCGTypes"] }
+
+# Core Audio (volume control, device enumeration)
+coreaudio-rs = "0.14"
+
+# Foreign types (for CGImage::from_ptr)
+foreign-types = "0.5"
+
+# IOKit (hardware enumeration, battery, USB, GPU)
+io-kit-sys = "0.5"
+
+# BLE scanning via CoreBluetooth
+btleplug = "0.12"
+tokio = { version = "1", features = ["rt", "time"] }
+
 [profile.release]
 lto = true
 strip = "symbols"

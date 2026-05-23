@@ -34,7 +34,14 @@ fn print_software(value: &serde_json::Value) {
       println!("No installed software found.");
       return;
     }
-    let mut t = super::Table::new(vec![("NAME", 36), ("VERSION", 14), ("PUBLISHER", 24), ("INSTALL_LOCATION", 40), ("INSTALL_DATE", 12), ("SIZE_KB", 10)]);
+    let mut t = super::Table::new(vec![
+      ("NAME", 36),
+      ("VERSION", 14),
+      ("PUBLISHER", 24),
+      ("INSTALL_LOCATION", 40),
+      ("INSTALL_DATE", 12),
+      ("SIZE_KB", 10),
+    ]);
     for s in arr {
       let name = s["name"].as_str().unwrap_or("");
       let version = s["version"].as_str().unwrap_or("");
@@ -42,7 +49,14 @@ fn print_software(value: &serde_json::Value) {
       let location = s["installLocation"].as_str().unwrap_or("");
       let date = s["installDate"].as_str().unwrap_or("");
       let size = s["estimatedSizeKB"].as_u64().map(|v| v.to_string()).unwrap_or_default();
-      t.row(vec![name.to_string(), version.to_string(), publisher.to_string(), location.to_string(), date.to_string(), size]);
+      t.row(vec![
+        name.to_string(),
+        version.to_string(),
+        publisher.to_string(),
+        location.to_string(),
+        date.to_string(),
+        size,
+      ]);
     }
     t.print();
   }
