@@ -1,0 +1,5 @@
+edition = "2024"
+# The warnings caused by this setting can be ignored.
+imports_granularity = "Item"
+tab_spaces = 2
+max_width = 120

@@ -1,0 +1,7 @@
+[app]
+id = "computer-use"
+version = "0.1.0"
+description = "Windows desktop automation — mouse, keyboard, windows, elements, screenshots"
+
+[runtime]
+binary = "tokimo-app-computer-use"

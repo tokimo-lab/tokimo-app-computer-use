@@ -1,0 +1,10 @@
+/target
+*.node
+index.js
+index.d.ts
+node_modules
+*.xml
+*.png
+*.webp
+*.jpg
+.claude/
