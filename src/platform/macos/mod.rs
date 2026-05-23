@@ -1,5 +1,6 @@
 mod bluetooth;
 mod elements;
+mod input_source;
 mod keyboard;
 mod mouse;
 mod process;
@@ -64,13 +65,45 @@ impl MouseControl for MacPlatform {
 impl KeyboardControl for MacPlatform {
   fn type_text(
     &self,
-    _scope: ElementScope,
-    _text: &str,
-    _position: Option<(f64, f64)>,
-    _enter: bool,
-    _clear: bool,
+    scope: ElementScope,
+    text: &str,
+    position: Option<(f64, f64)>,
+    enter: bool,
+    clear: bool,
   ) -> Result<()> {
-    todo!("macos: type_text")
+    use crate::types::KeyCode;
+
+    // Resolve the target window and focus it
+    let handle = match &scope {
+      ElementScope::Window(h) => h.clone(),
+      ElementScope::Application(pid) => {
+        let wins = window::get_windows_by_process_id(*pid)?;
+        wins.into_iter().next().map(|w| WindowHandle(w.hwnd)).ok_or_else(|| anyhow::anyhow!("no windows for pid {pid}"))?
+      }
+      ElementScope::Foreground => window::get_foreground_window()?,
+    };
+    window::focus_window(&handle)?;
+
+    // Optional: click at position first
+    if let Some((px, py)) = position {
+      mouse::click(&handle, px, py, crate::types::MouseButton::Left, false)?;
+    }
+
+    // Optional: select-all and delete existing content
+    if clear {
+      keyboard::send_keys(&[KeyCode::A], Some(&[KeyCode::Win]))?;
+      keyboard::send_keys(&[KeyCode::Delete], None)?;
+    }
+
+    // Type the text
+    keyboard::type_text_raw(&handle, text)?;
+
+    // Optional: press Enter/Return
+    if enter {
+      keyboard::send_keys(&[KeyCode::Return], None)?;
+    }
+
+    Ok(())
   }
   fn send_keys(&self, keys: &[KeyCode], modifiers: Option<&[KeyCode]>) -> Result<()> {
     keyboard::send_keys(keys, modifiers)
@@ -106,6 +139,9 @@ impl WindowManager for MacPlatform {
   fn get_windows_by_process_id(&self, pid: u32) -> Result<Vec<WindowInfo>> {
     window::get_windows_by_process_id(pid)
   }
+  fn focus_app(&self, pid: u32) -> Result<()> {
+    window::focus_app_by_pid(pid)
+  }
   fn get_window_title(&self, handle: &WindowHandle) -> Result<String> {
     window::get_window_title(handle)
   }
@@ -137,14 +173,14 @@ impl WindowManager for MacPlatform {
 
 // === ElementFinder ===
 impl ElementFinder for MacPlatform {
-  fn query_elements(&self, _scope: ElementScope, _q: &ElementQuery) -> Result<Vec<Box<dyn Element>>> {
-    todo!("macos: query_elements")
+  fn query_elements(&self, scope: ElementScope, q: &ElementQuery) -> Result<Vec<Box<dyn Element>>> {
+    elements::query_elements(&scope, q)
   }
-  fn query_one(&self, _scope: ElementScope, _q: &ElementQuery) -> Result<Box<dyn Element>> {
-    todo!("macos: query_one")
+  fn query_one(&self, scope: ElementScope, q: &ElementQuery) -> Result<Box<dyn Element>> {
+    elements::query_one(&scope, q)
   }
-  fn find_by_xpath(&self, _scope: ElementScope, _xpath: &str) -> Result<Vec<Box<dyn Element>>> {
-    todo!("macos: find_by_xpath")
+  fn find_by_xpath(&self, scope: ElementScope, xpath: &str) -> Result<Vec<Box<dyn Element>>> {
+    elements::find_by_xpath(&scope, xpath)
   }
 }
 
@@ -155,6 +191,9 @@ impl UiTreeInspector for MacPlatform {
   }
   fn get_page_source_verbose(&self, handle: &WindowHandle) -> Result<String> {
     elements::get_page_source_verbose(handle)
+  }
+  fn render_tree(&self, scope: ElementScope, query: &ElementQuery) -> Result<String> {
+    elements::render_tree(&scope, query)
   }
   fn probe_at_position(&self, x: i32, y: i32) -> Result<String> {
     elements::probe_at_position(x, y)
@@ -176,8 +215,8 @@ impl ProcessManager for MacPlatform {
   fn launch_app(&self, path: &str, wait_timeout_ms: u32) -> Result<u32> {
     process::launch_app(path, wait_timeout_ms)
   }
-  fn launch_app_async(&self, _path_or_bundle: &str, _wait: bool) -> Result<u32> {
-    todo!("macos: launch_app_async")
+  fn launch_app_async(&self, path_or_bundle: &str, wait: bool) -> Result<u32> {
+    process::launch_app_async(path_or_bundle, wait)
   }
   fn terminate_app(&self, pid: u32) -> Result<bool> {
     process::terminate_app(pid)
@@ -193,6 +232,9 @@ impl ProcessManager for MacPlatform {
   }
   fn get_process_info(&self, pid: u32) -> Result<ProcessInfo> {
     process::get_process_info(pid)
+  }
+  fn resolve_app_pid(&self, name: &str) -> Result<Option<u32>> {
+    process::resolve_app_pid(name)
   }
 }
 

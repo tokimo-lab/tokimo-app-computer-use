@@ -254,6 +254,61 @@ fn launch_via_ns_workspace(path: &str) -> Result<()> {
   }
 }
 
+/// Launch an application asynchronously using NSWorkspace typed API (BUG-12).
+/// path_or_bundle can be either an app bundle path (/Applications/Foo.app)
+/// or a bundle identifier (com.apple.Calculator).
+pub fn launch_app_async(path_or_bundle: &str, wait: bool) -> Result<u32> {
+  use block2::RcBlock;
+  use objc2::AnyThread;
+  use objc2_app_kit::{NSRunningApplication, NSWorkspace, NSWorkspaceOpenConfiguration};
+  use objc2_foundation::{NSError, NSURL};
+  use std::sync::mpsc;
+  use std::time::Duration;
+
+  let (tx, rx) = mpsc::channel::<Result<u32>>();
+
+  // Resolve URL from path or bundle ID
+  let url = unsafe {
+    let ws = NSWorkspace::sharedWorkspace();
+    if path_or_bundle.starts_with('/') || path_or_bundle.starts_with('~') {
+      let ns_str = objc2_foundation::NSString::from_str(path_or_bundle);
+      NSURL::fileURLWithPath(&ns_str)
+    } else {
+      let ns_bundle = objc2_foundation::NSString::from_str(path_or_bundle);
+      ws.URLForApplicationWithBundleIdentifier(&ns_bundle)
+        .ok_or_else(|| anyhow::anyhow!("bundle ID not found: {path_or_bundle}"))?
+    }
+  };
+
+  let cfg = unsafe {
+    NSWorkspaceOpenConfiguration::init(NSWorkspaceOpenConfiguration::alloc())
+  };
+
+  let block = RcBlock::new(move |app: *mut NSRunningApplication, err: *mut NSError| {
+    if !err.is_null() && app.is_null() {
+      let msg = unsafe { (*err).localizedDescription().to_string() };
+      let _ = tx.send(Err(anyhow::anyhow!("launch failed: {msg}")));
+    } else if !app.is_null() {
+      let pid = unsafe { (*app).processIdentifier() };
+      let _ = tx.send(Ok(pid as u32));
+    } else {
+      let _ = tx.send(Err(anyhow::anyhow!("launch returned nil app")));
+    }
+  });
+
+  unsafe {
+    let ws = NSWorkspace::sharedWorkspace();
+    ws.openApplicationAtURL_configuration_completionHandler(&url, &cfg, Some(&block));
+  }
+
+  let timeout = if wait { Duration::from_secs(20) } else { Duration::from_secs(5) };
+  match rx.recv_timeout(timeout) {
+    Ok(Ok(pid)) => Ok(pid),
+    Ok(Err(e)) => Err(e),
+    Err(_) => Err(anyhow::anyhow!("launch_app_async timed out")),
+  }
+}
+
 pub fn terminate_app(pid: u32) -> Result<bool> {
   unsafe {
     let cls =
@@ -280,4 +335,63 @@ pub fn terminate_apps_by_name(name: &str) -> Result<(u32, u32)> {
     }
   }
   Ok((total, success))
+}
+
+/// Resolve an "app" identifier (localized name / bundle id / executable name) to a PID
+/// using NSWorkspace.runningApplications. Case-insensitive contains match.
+pub fn resolve_app_pid(name: &str) -> Result<Option<u32>> {
+  use objc2_app_kit::NSWorkspace;
+  let needle = name.to_lowercase();
+  unsafe {
+    let ws = NSWorkspace::sharedWorkspace();
+    let apps = ws.runningApplications();
+    let count = apps.count();
+
+    // Score every candidate. Higher is better.
+    //   +1000 exact localizedName / bundle / executable
+    //   +500  activationPolicy == .regular (i.e. has dock icon / UI)
+    //   +200  is currently active
+    //   +100  substring match
+    let mut scored: Vec<(i32, u32, String)> = Vec::new();
+    for i in 0..count {
+      let app = apps.objectAtIndex(i);
+      let pid = app.processIdentifier() as u32;
+      let localized = app.localizedName().map(|s| s.to_string()).unwrap_or_default();
+      let bundle = app.bundleIdentifier().map(|s| s.to_string()).unwrap_or_default();
+      let exec = app
+        .executableURL()
+        .and_then(|u| u.lastPathComponent())
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+      let l_low = localized.to_lowercase();
+      let b_low = bundle.to_lowercase();
+      let e_low = exec.to_lowercase();
+      let mut score = 0i32;
+      if l_low == needle || b_low == needle || e_low == needle {
+        score += 1000;
+      } else if l_low.contains(&needle) || b_low.contains(&needle) || e_low.contains(&needle) {
+        score += 100;
+      } else {
+        continue;
+      }
+      // activationPolicy: 0 = regular (has UI), 1 = accessory, 2 = prohibited
+      let policy = app.activationPolicy().0 as i32;
+      if policy == 0 {
+        score += 500;
+      } else if policy == 2 {
+        score -= 500; // strongly disprefer background helpers
+      }
+      if app.isActive() {
+        score += 200;
+      }
+      // Prefer apps that actually own at least one CGWindow (filters out launchers
+      // and helpers that match by name but have no UI).
+      if super::window::get_windows_by_process_id(pid).map(|w| !w.is_empty()).unwrap_or(false) {
+        score += 300;
+      }
+      scored.push((score, pid, localized));
+    }
+    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    Ok(scored.into_iter().next().map(|(_, pid, _)| pid))
+  }
 }

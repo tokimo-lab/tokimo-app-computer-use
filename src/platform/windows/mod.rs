@@ -126,6 +126,15 @@ impl WindowManager for WindowsPlatform {
   fn get_windows_by_process_id(&self, pid: u32) -> Result<Vec<WindowInfo>> {
     wnd::get_all_windows_by_process_id_internal(pid)
   }
+  fn focus_app(&self, pid: u32) -> Result<()> {
+    // Best-effort: focus the first window of this pid.
+    let wins = wnd::get_all_windows_by_process_id_internal(pid)?;
+    if let Some(w) = wins.into_iter().next() {
+      wnd::focus_window_by_handle(w.hwnd)
+    } else {
+      Err(anyhow::anyhow!("no windows for pid {pid}"))
+    }
+  }
   fn get_window_title(&self, handle: &WindowHandle) -> Result<String> {
     wnd::get_window_title_by_handle(handle.0)
   }
@@ -182,6 +191,15 @@ impl UiTreeInspector for WindowsPlatform {
   fn get_page_source_verbose(&self, handle: &WindowHandle) -> Result<String> {
     elements::source::get_page_source_from_hwnd(handle.0)
   }
+  fn render_tree(&self, scope: ElementScope, _query: &ElementQuery) -> Result<String> {
+    // TODO(windows): wire to query-based renderer (phase 2). For now fall back
+    // to the legacy page source dump using whichever window the scope resolves to.
+    let handle = match scope {
+      ElementScope::Window(h) => h,
+      _ => self.get_foreground_window()?,
+    };
+    elements::source::get_page_source_from_hwnd(handle.0)
+  }
   fn probe_at_position(&self, _x: i32, _y: i32) -> Result<String> {
     Err(anyhow::anyhow!("probe_at_position not implemented for Windows"))
   }
@@ -219,6 +237,9 @@ impl ProcessManager for WindowsPlatform {
   }
   fn get_process_info(&self, pid: u32) -> Result<ProcessInfo> {
     process::get_process_info(pid)
+  }
+  fn resolve_app_pid(&self, name: &str) -> Result<Option<u32>> {
+    Ok(process::get_process_ids_by_name(name)?.into_iter().next())
   }
 }
 

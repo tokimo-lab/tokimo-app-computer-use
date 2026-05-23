@@ -52,6 +52,9 @@ pub trait WindowManager {
   fn find_windows_by_title(&self, pattern: &str, process_name: Option<&str>) -> Result<Vec<WindowInfo>>;
   fn find_windows_by_process(&self, pattern: &str) -> Result<Vec<WindowInfo>>;
   fn get_windows_by_process_id(&self, pid: u32) -> Result<Vec<WindowInfo>>;
+  /// Activate an app by pid and raise its first AX window. Used when we have a pid
+  /// but no valid WindowHandle (e.g. `--app` resolution via NSWorkspace).
+  fn focus_app(&self, pid: u32) -> Result<()>;
   fn get_window_title(&self, handle: &WindowHandle) -> Result<String>;
   fn get_foreground_window(&self) -> Result<WindowHandle>;
   fn focus_window(&self, handle: &WindowHandle) -> Result<()>;
@@ -106,6 +109,9 @@ pub trait ElementFinder {
 pub trait UiTreeInspector {
   fn get_page_source(&self, handle: &WindowHandle) -> Result<String>;
   fn get_page_source_verbose(&self, handle: &WindowHandle) -> Result<String>;
+  /// Render a hierarchical tree of `scope`'s UI elements, honoring `query`'s
+  /// role/text filter and including hit-test-discovered detached subtrees.
+  fn render_tree(&self, scope: ElementScope, query: &ElementQuery) -> Result<String>;
   /// Probe the element at a screen position and dump all its AX attributes.
   fn probe_at_position(&self, x: i32, y: i32) -> Result<String>;
 }
@@ -130,6 +136,9 @@ pub trait ProcessManager {
   fn get_process_ids_by_name(&self, name: &str) -> Result<Vec<u32>>;
   fn list_processes(&self) -> Result<Vec<ProcessInfo>>;
   fn get_process_info(&self, pid: u32) -> Result<ProcessInfo>;
+  /// Resolve an "app" identifier (localized name / bundle id / executable name) to a PID.
+  /// Returns `None` if the app is not currently running.
+  fn resolve_app_pid(&self, name: &str) -> Result<Option<u32>>;
 }
 
 // ============================================================

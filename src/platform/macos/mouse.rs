@@ -1,4 +1,3 @@
-use core_graphics::display::CGDisplay;
 use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton, EventField};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::CGPoint;
@@ -20,6 +19,7 @@ unsafe extern "C" {
     wheel2: i32,
     wheel3: i32,
   ) -> core_graphics::sys::CGEventRef;
+  fn CGWarpMouseCursorPosition(new_cursor_position: CGPoint);
 }
 
 fn create_source() -> Result<CGEventSource> {
@@ -27,18 +27,31 @@ fn create_source() -> Result<CGEventSource> {
     .map_err(|_| anyhow::anyhow!("failed to create CGEventSource"))
 }
 
-fn screen_height() -> f64 {
-  CGDisplay::main().pixels_high() as f64
+/// Return the logical (point-based) screen size — correct for Retina displays.
+/// NSScreen.mainScreen.frame uses logical points, not physical pixels.
+fn logical_screen_size() -> (f64, f64) {
+  unsafe {
+    let mtm = objc2::MainThreadMarker::new_unchecked();
+    if let Some(screen) = objc2_app_kit::NSScreen::mainScreen(mtm) {
+      let frame = screen.frame();
+      return (frame.size.width, frame.size.height);
+    }
+  }
+  // Fallback: physical pixels (wrong on Retina, but better than crashing)
+  let d = core_graphics::display::CGDisplay::main();
+  (d.pixels_wide() as f64, d.pixels_high() as f64)
 }
 
-/// Convert top-left origin coordinates to CGEvent bottom-left origin.
+/// CGEvent mouse events use top-left global display coordinates — the same
+/// origin as AX, NSWindow.frame.... wait no — NSWindow is bottom-left, but
+/// CGEvent mouse position and AX both use top-left. No flip is needed.
 fn to_cg_y(y: f64) -> f64 {
-  screen_height() - y
+  y
 }
 
-/// Convert CGEvent bottom-left origin coordinates to top-left origin.
+/// CGEvent.location() also returns top-left global display coordinates.
 fn from_cg_y(y: f64) -> f64 {
-  screen_height() - y
+  y
 }
 
 fn post_event(event: &CGEvent) -> Result<()> {
@@ -91,6 +104,18 @@ fn screen_to_abs(handle: &WindowHandle, x: f64, y: f64) -> Result<(i32, i32)> {
   }
 }
 
+fn do_click(source: &CGEventSource, point: CGPoint, cg_button: CGMouseButton, down_type: CGEventType, up_type: CGEventType, click_state: i64) -> Result<()> {
+  let down_event = CGEvent::new_mouse_event(source.clone(), down_type, point, cg_button)
+    .map_err(|_| anyhow::anyhow!("failed to create mouse down event"))?;
+  down_event.set_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE, click_state);
+  post_event(&down_event)?;
+
+  let up_event = CGEvent::new_mouse_event(source.clone(), up_type, point, cg_button)
+    .map_err(|_| anyhow::anyhow!("failed to create mouse up event"))?;
+  up_event.set_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE, click_state);
+  post_event(&up_event)
+}
+
 pub fn click(
   handle: &WindowHandle,
   x: f64,
@@ -106,25 +131,20 @@ pub fn click(
     MouseButton::Right => CGMouseButton::Right,
     MouseButton::Middle => CGMouseButton::Center,
   };
-  let click_count = if double_click { 2_i64 } else { 1_i64 };
-
   let (down_type, up_type) = match button {
     MouseButton::Left => (CGEventType::LeftMouseDown, CGEventType::LeftMouseUp),
     MouseButton::Right => (CGEventType::RightMouseDown, CGEventType::RightMouseUp),
     MouseButton::Middle => (CGEventType::OtherMouseDown, CGEventType::OtherMouseUp),
   };
 
-  // Mouse down
-  let down_event = CGEvent::new_mouse_event(source.clone(), down_type, point, cg_button)
-    .map_err(|_| anyhow::anyhow!("failed to create mouse down event"))?;
-  down_event.set_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE, click_count);
-  post_event(&down_event)?;
-
-  // Mouse up
-  let up_event = CGEvent::new_mouse_event(source, up_type, point, cg_button)
-    .map_err(|_| anyhow::anyhow!("failed to create mouse up event"))?;
-  up_event.set_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE, click_count);
-  post_event(&up_event)?;
+  if double_click {
+    // BUG-06: Two full down/up sequences, click_state 1 then 2, with 50ms gap
+    do_click(&source, point, cg_button, down_type, up_type, 1)?;
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    do_click(&source, point, cg_button, down_type, up_type, 2)?;
+  } else {
+    do_click(&source, point, cg_button, down_type, up_type, 1)?;
+  }
 
   Ok(InputResult::success(abs_x, abs_y, x as i32, y as i32))
 }
@@ -171,7 +191,7 @@ pub fn drag(
     .map_err(|_| anyhow::anyhow!("failed to create drag down event"))?;
   post_event(&down)?;
 
-  // Interpolate mouse moves
+  // Interpolate mouse drags (BUG-08: use LeftMouseDragged not MouseMoved)
   let steps = 10;
   for i in 1..=steps {
     let t = i as f64 / steps as f64;
@@ -179,7 +199,7 @@ pub fn drag(
       start.x + (end.x - start.x) * t,
       start.y + (end.y - start.y) * t,
     );
-    let mv = CGEvent::new_mouse_event(source.clone(), CGEventType::MouseMoved, pt, CGMouseButton::Left)
+    let mv = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseDragged, pt, CGMouseButton::Left)
       .map_err(|_| anyhow::anyhow!("failed to create drag move event"))?;
     post_event(&mv)?;
     std::thread::sleep(std::time::Duration::from_millis(10));
@@ -195,12 +215,17 @@ pub fn drag(
 
 pub fn scroll(
   _handle: &WindowHandle,
-  _x: f64,
-  _y: f64,
+  x: f64,
+  y: f64,
   delta_x: i32,
   delta_y: i32,
 ) -> Result<InputResult> {
   let source = create_source()?;
+
+  // BUG-07: Move cursor to target position before scrolling
+  let cg_point = CGPoint::new(x, to_cg_y(y));
+  unsafe { CGWarpMouseCursorPosition(cg_point) };
+
   // CGEvent scroll uses positive = up, but our API uses positive = down, so negate
   let cg_dy = -delta_y;
   let cg_dx = -delta_x;
@@ -221,5 +246,5 @@ pub fn scroll(
   let event = unsafe { CGEvent::from_ptr(event_ref) };
   post_event(&event)?;
 
-  Ok(InputResult::success(0, 0, 0, 0))
+  Ok(InputResult::success(x as i32, y as i32, x as i32, y as i32))
 }

@@ -44,6 +44,14 @@ pub fn dispatch<P: PlatformProvider + ?Sized>(
       Ok(json!(info))
     }
     "window.focus" => {
+      // Prefer pid-based focus for --app (works even when SCShareableContent is flaky).
+      if let Some(name) = params["app"].as_str()
+        && params["handle"].as_i64().is_none()
+        && let Some(pid) = platform.resolve_app_pid(name)?
+      {
+        platform.focus_app(pid)?;
+        return Ok(json!(null));
+      }
       let handle = req_handle(platform, params)?;
       platform.focus_window(&handle)?;
       Ok(json!(null))
@@ -104,7 +112,7 @@ pub fn dispatch<P: PlatformProvider + ?Sized>(
       Ok(json!({"x": x, "y": y}))
     }
     "mouse.click" => {
-      let handle = req_handle(platform, params)?;
+      let handle = opt_handle(platform, params)?;
       let x = req_f64(params, "x")?;
       let y = req_f64(params, "y")?;
       let button = req_button(params)?;
@@ -112,7 +120,7 @@ pub fn dispatch<P: PlatformProvider + ?Sized>(
       Ok(json!(platform.click(&handle, x, y, button, double)?))
     }
     "mouse.drag" => {
-      let handle = req_handle(platform, params)?;
+      let handle = opt_handle(platform, params)?;
       let x1 = req_f64(params, "x1")?;
       let y1 = req_f64(params, "y1")?;
       let x2 = req_f64(params, "x2")?;
@@ -121,7 +129,7 @@ pub fn dispatch<P: PlatformProvider + ?Sized>(
       Ok(json!(platform.drag(&handle, x1, y1, x2, y2, button)?))
     }
     "mouse.scroll" => {
-      let handle = req_handle(platform, params)?;
+      let handle = opt_handle(platform, params)?;
       let x = req_f64(params, "x")?;
       let y = req_f64(params, "y")?;
       let dx = params["dx"].as_i64().unwrap_or(0) as i32;
@@ -175,9 +183,10 @@ pub fn dispatch<P: PlatformProvider + ?Sized>(
       let q = parse_query(params);
       let button = req_button(params)?;
       let double = params["double"].as_bool().unwrap_or(false);
-      let elem = platform.query_one(scope, &q)?;
+      let elem = platform.query_one(scope.clone(), &q)?;
       let cx = elem.x() as f64 + elem.width() as f64 / 2.0;
       let cy = elem.y() as f64 + elem.height() as f64 / 2.0;
+      ensure_foreground(platform, &scope)?;
       let handle = platform.get_foreground_window()?;
       Ok(json!(platform.click(&handle, cx, cy, button, double)?))
     }
@@ -187,17 +196,50 @@ pub fn dispatch<P: PlatformProvider + ?Sized>(
       let value = req_str(params, "value")?;
       let enter = params["enter"].as_bool().unwrap_or(false);
       let clear = params["clear"].as_bool().unwrap_or(false);
-      let elem = platform.query_one(scope.clone(), &q)?;
+
+      // Find all candidates and prefer one with a sane on-screen rect.
+      // Qt apps often expose multiple "Edit"-like elements; some are off-screen
+      // shadows (e.g. -1, 1057, ...). If the user passed `--nth N` we honour
+      // it by indexing only into the visible subset (this matches what
+      // `element find` shows).
+      let candidates = platform.query_elements(scope.clone(), &q)?;
+      if candidates.is_empty() {
+        return Err(anyhow::anyhow!("no element matches the query"));
+      }
+      let visible: Vec<_> = candidates
+        .iter()
+        .filter(|e| e.x() >= 0 && e.y() >= 0 && e.width() > 8 && e.height() > 8)
+        .collect();
+      let pool = if visible.is_empty() { candidates.iter().collect() } else { visible };
+      let nth = q.index.unwrap_or(0);
+      let elem = pool
+        .get(nth)
+        .ok_or_else(|| anyhow::anyhow!("only {} matches; --nth {} out of range", pool.len(), nth))?;
+
+      // 0. Force the target app to the foreground. Synthetic CGEvent keystrokes
+      //    go to whichever app is frontmost; without this, when the CLI is run
+      //    from a Terminal, the shell steals focus between commands.
+      ensure_foreground(platform, &scope)?;
+
+      // 1. AX focus (works for Cocoa, no-op for Qt customs).
+      let _ = elem.set_focused();
+
+      // 2. Click the element center to force Qt/Electron to take focus.
       let pos = Some((
         elem.x() as f64 + elem.width() as f64 / 2.0,
         elem.y() as f64 + elem.height() as f64 / 2.0,
       ));
+
+      // 3. Synthesize keystrokes via CGEvent. type_text handles focus_window,
+      //    optional mouse click, optional Cmd+A/Delete (clear), the typing,
+      //    and optional Enter.
       platform.type_text(scope, value, pos, enter, clear)?;
       Ok(json!(null))
     }
     "element.tree" => {
-      let handle = req_handle(platform, params)?;
-      Ok(json!(platform.get_page_source(&handle)?))
+      let scope = parse_scope(platform, params)?;
+      let q = parse_query(params);
+      Ok(json!(platform.render_tree(scope, &q)?))
     }
     "element.probe" => {
       let x = params["x"].as_i64().unwrap_or(0) as i32;
@@ -207,42 +249,9 @@ pub fn dispatch<P: PlatformProvider + ?Sized>(
     "element.activate" => {
       let scope = parse_scope(platform, params)?;
       let q = parse_query(params);
-      let elem = platform.query_one(scope, &q)?;
+      let elem = platform.query_one(scope.clone(), &q)?;
+      ensure_foreground(platform, &scope)?;
       elem.confirm()?;
-      Ok(json!(null))
-    }
-    "element.xpath_query" => {
-      let scope = parse_scope(platform, params)?;
-      let xpath = req_str(params, "xpath")?;
-      let elements = platform.find_by_xpath(scope, xpath)?;
-      let infos: Vec<serde_json::Value> = elements.iter().map(elem_to_json).collect();
-      Ok(json!(infos))
-    }
-    "element.xpath_click" => {
-      let scope = parse_scope(platform, params)?;
-      let xpath = req_str(params, "xpath")?;
-      let button = req_button(params)?;
-      let double = params["double"].as_bool().unwrap_or(false);
-      let elements = platform.find_by_xpath(scope, xpath)?;
-      let elem = elements.into_iter().next().ok_or_else(|| anyhow::anyhow!("no element found for xpath"))?;
-      let cx = elem.x() as f64 + elem.width() as f64 / 2.0;
-      let cy = elem.y() as f64 + elem.height() as f64 / 2.0;
-      let handle = platform.get_foreground_window()?;
-      Ok(json!(platform.click(&handle, cx, cy, button, double)?))
-    }
-    "element.xpath_type" => {
-      let scope = parse_scope(platform, params)?;
-      let xpath = req_str(params, "xpath")?;
-      let value = req_str(params, "value")?;
-      let enter = params["enter"].as_bool().unwrap_or(false);
-      let clear = params["clear"].as_bool().unwrap_or(false);
-      let elements = platform.find_by_xpath(scope.clone(), xpath)?;
-      let elem = elements.into_iter().next().ok_or_else(|| anyhow::anyhow!("no element found for xpath"))?;
-      let pos = Some((
-        elem.x() as f64 + elem.width() as f64 / 2.0,
-        elem.y() as f64 + elem.height() as f64 / 2.0,
-      ));
-      platform.type_text(scope, value, pos, enter, clear)?;
       Ok(json!(null))
     }
 
@@ -473,11 +482,43 @@ fn parse_scope<P: PlatformProvider + ?Sized>(
     return Ok(ElementScope::Window(WindowHandle(h)));
   }
   if let Some(name) = params["app"].as_str() {
+    // Resolve via running-applications first (more reliable than SCShareableContent).
+    if let Some(pid) = platform.resolve_app_pid(name)? {
+      return Ok(ElementScope::Application(pid));
+    }
+    // Fallback to window-based lookup
     let wins = platform.find_windows_by_process(name)?;
     let w = wins.into_iter().next().ok_or_else(|| anyhow::anyhow!("app not found: {name}"))?;
     return Ok(ElementScope::Window(WindowHandle(w.hwnd)));
   }
   Ok(ElementScope::Foreground)
+}
+
+/// Force the target app to the foreground before injecting synthetic input.
+///
+/// Synthetic CGEvent keystrokes / clicks are delivered to whichever app is
+/// frontmost at the moment of injection. When the CLI is invoked one command
+/// at a time from a Terminal, the Terminal re-claims focus between commands,
+/// so input meant for the target app gets swallowed by the shell. Every
+/// input-injection method must call this first.
+fn ensure_foreground<P: PlatformProvider + ?Sized>(
+  platform: &P,
+  scope: &ElementScope,
+) -> crate::error::Result<()> {
+  let pid = match scope {
+    ElementScope::Application(pid) => Some(*pid),
+    ElementScope::Window(h) => platform
+      .find_windows_by_title("", None)
+      .ok()
+      .and_then(|wins| wins.into_iter().find(|w| w.hwnd == h.0).map(|w| w.process_id)),
+    ElementScope::Foreground => None,
+  };
+  if let Some(pid) = pid {
+    let _ = platform.focus_app(pid);
+    // Give the WindowServer a moment to actually swap key window.
+    std::thread::sleep(std::time::Duration::from_millis(120));
+  }
+  Ok(())
 }
 
 fn parse_query(params: &serde_json::Value) -> ElementQuery {
@@ -487,6 +528,8 @@ fn parse_query(params: &serde_json::Value) -> ElementQuery {
     text_exact: params["text_exact"].as_bool().unwrap_or(false),
     index: params["index"].as_u64().map(|v| v as usize),
     max_depth: params["max_depth"].as_u64().map(|v| v as usize),
+    include_hidden: params["include_hidden"].as_bool().unwrap_or(false),
+    no_hit_test: params["no_hit_test"].as_bool().unwrap_or(false),
   }
 }
 
@@ -497,6 +540,7 @@ fn elem_to_json(e: &Box<dyn crate::platform::Element>) -> serde_json::Value {
     "automation_id": e.automation_id(),
     "class_name": e.class_name(),
     "control_type": e.control_type(),
+    "help_text": e.help_text(),
     "x": e.x(),
     "y": e.y(),
     "width": e.width(),
@@ -533,10 +577,27 @@ fn req_handle<P: PlatformProvider + ?Sized>(
   }
   if let Some(app) = params["app"].as_str() {
     let wins = platform.find_windows_by_process(app)?;
-    let w = wins.into_iter().next().ok_or_else(|| anyhow::anyhow!("no window for app: {app}"))?;
+    // Pick the largest visible window (skip tiny tray/popups).
+    let w = wins
+      .into_iter()
+      .filter(|w| w.width > 50 && w.height > 50)
+      .max_by_key(|w| (w.width as i64) * (w.height as i64))
+      .ok_or_else(|| anyhow::anyhow!("no window for app: {app}"))?;
     return Ok(WindowHandle(w.hwnd));
   }
   platform.get_foreground_window()
+}
+
+/// Like req_handle, but returns WindowHandle(0) when no -w/--app provided.
+/// Used by mouse.* where default coords are screen-absolute (NOT window-relative).
+fn opt_handle<P: PlatformProvider + ?Sized>(
+  platform: &P,
+  params: &serde_json::Value,
+) -> crate::error::Result<WindowHandle> {
+  if params["handle"].as_i64().is_some() || params["app"].as_str().is_some() {
+    return req_handle(platform, params);
+  }
+  Ok(WindowHandle(0))
 }
 
 fn req_str<'a>(params: &'a serde_json::Value, key: &str) -> crate::error::Result<&'a str> {
@@ -585,7 +646,8 @@ fn parse_key_combo(combo: &str) -> crate::error::Result<(Vec<KeyCode>, Vec<KeyCo
   let mut modifiers = Vec::new();
   let mut main_keys = Vec::new();
   for part in &parts {
-    let key: KeyCode = serde_json::from_value(serde_json::Value::String(part.to_string()))
+    let canonical = normalize_key_alias(part);
+    let key: KeyCode = serde_json::from_value(serde_json::Value::String(canonical.to_string()))
       .map_err(|_| anyhow::anyhow!("unknown key: {part}"))?;
     if is_modifier_key(&key) {
       modifiers.push(key);
@@ -617,4 +679,34 @@ fn is_modifier_key(key: &KeyCode) -> bool {
       | KeyCode::LWin
       | KeyCode::RWin
   )
+}
+
+/// Map common cross-platform aliases (cmd, command, meta, super, option, opt,
+/// control, return) onto canonical KeyCode variant names.
+fn normalize_key_alias(part: &str) -> String {
+  let lower = part.to_ascii_lowercase();
+  match lower.as_str() {
+    "cmd" | "command" | "meta" | "super" => return "Win".to_string(),
+    "lcmd" | "lcommand" | "lmeta" => return "LWin".to_string(),
+    "rcmd" | "rcommand" | "rmeta" => return "RWin".to_string(),
+    "option" | "opt" => return "Alt".to_string(),
+    "loption" | "lopt" => return "LAlt".to_string(),
+    "roption" | "ropt" => return "RAlt".to_string(),
+    "control" => return "Ctrl".to_string(),
+    "lcontrol" => return "LCtrl".to_string(),
+    "rcontrol" => return "RCtrl".to_string(),
+    "return" => return "Enter".to_string(),
+    "esc" => return "Escape".to_string(),
+    "del" => return "Delete".to_string(),
+    "ins" => return "Insert".to_string(),
+    _ => {}
+  }
+  // Single ASCII letter → uppercase (a → A) so it deserializes to KeyCode::A.
+  if part.len() == 1 {
+    let c = part.chars().next().unwrap();
+    if c.is_ascii_alphabetic() {
+      return c.to_ascii_uppercase().to_string();
+    }
+  }
+  part.to_string()
 }

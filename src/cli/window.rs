@@ -75,7 +75,11 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: WindowAction) -> Result<(
             let proc = w["processName"].as_str().unwrap_or("");
             let width = w["width"].as_i64().unwrap_or(0);
             let height = w["height"].as_i64().unwrap_or(0);
-            !title.is_empty() && !is_system_window_title(title, proc) && width >= 100 && height >= 100
+            // Drop sub-100px noise and known system IME/overlay windows.
+            // Do NOT require non-empty title: many real macOS app windows
+            // (Qt, Electron, some Cocoa apps including QQ音乐) legitimately
+            // have empty titles. process_name is the meaningful identifier.
+            !is_system_window_title(title, proc) && width >= 100 && height >= 100
           });
         }
       }

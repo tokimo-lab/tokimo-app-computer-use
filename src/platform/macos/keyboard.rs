@@ -281,6 +281,7 @@ fn send_key_event_to_pid(kc: u16, flags: CGEventFlags, pid: i32) -> Result<()> {
 /// Type text to a specific PID via CGEventPostToPid.
 #[allow(dead_code)]
 pub fn type_text_to_pid(pid: i32, text: &str) -> Result<()> {
+  let _guard = super::input_source::AsciiInputGuard::enter();
   for ch in text.chars() {
     if let Some(kc) = keycode_for_char(ch) {
       let shift = needs_shift(ch);
@@ -338,6 +339,7 @@ pub fn send_keys_to_pid(pid: i32, keys: &[KeyCode], modifiers: Option<&[KeyCode]
 }
 
 pub fn type_text(_handle: &WindowHandle, text: &str, _position: Option<&InputPosition>) -> Result<InputResult> {
+  let _guard = super::input_source::AsciiInputGuard::enter();
   for ch in text.chars() {
     if let Some(kc) = keycode_for_char(ch) {
       let shift = needs_shift(ch);
@@ -352,6 +354,7 @@ pub fn type_text(_handle: &WindowHandle, text: &str, _position: Option<&InputPos
 }
 
 pub fn type_text_raw(_handle: &WindowHandle, text: &str) -> Result<()> {
+  let _guard = super::input_source::AsciiInputGuard::enter();
   for ch in text.chars() {
     if let Some(kc) = keycode_for_char(ch) {
       let shift = needs_shift(ch);

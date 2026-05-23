@@ -652,6 +652,13 @@ pub struct ElementQuery {
   pub index: Option<usize>,
   /// Maximum depth to search in the AX tree
   pub max_depth: Option<usize>,
+  /// Include off-screen / zero-size elements in results (default: hide them)
+  #[serde(default)]
+  pub include_hidden: bool,
+  /// Disable the hit-test grid scan that discovers detached AX subtrees.
+  /// Useful when speed matters and the target app exposes a normal AX tree.
+  #[serde(default)]
+  pub no_hit_test: bool,
 }
 
 /// Scope that determines where to start an element or keyboard operation.

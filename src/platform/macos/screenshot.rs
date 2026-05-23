@@ -159,28 +159,61 @@ pub fn take_desktop_screenshot(config: Option<&ScreenshotConfig>) -> Result<Vec<
 }
 
 pub fn take_window_screenshot(handle: &WindowHandle) -> Result<Vec<u8>> {
-  // Capture the full display and crop to the window bounds
+  // BUG-02: Use SCContentFilter::initWithDesktopIndependentWindow_ for window capture
+  // instead of capturing the full display and cropping.
   let content = get_shareable_content()?;
   let windows = unsafe { content.windows() };
   let sc_window = (0..windows.len())
     .map(|i| windows.objectAtIndex(i))
     .find(|w| unsafe { w.windowID() } == handle.0 as u32)
-    .ok_or_else(|| anyhow::anyhow!("window {} not found", handle.0))?;
+    .ok_or_else(|| anyhow::anyhow!("window {} not found in shareable content", handle.0))?;
 
-  let frame = unsafe { sc_window.frame() };
-  let displays = unsafe { content.displays() };
-  if displays.len() == 0 {
-    return Err(anyhow::anyhow!("no displays"));
+  let filter = unsafe {
+    SCContentFilter::initWithDesktopIndependentWindow(SCContentFilter::alloc(), &sc_window)
+  };
+  let config = unsafe { SCStreamConfiguration::init(SCStreamConfiguration::alloc()) };
+
+  // Default SCStreamConfiguration has width=height=0, producing a blank image.
+  // SCWindow.frame() can also return a misleading minimal frame for layered
+  // windows — read the authoritative size from our own window list.
+  let (w_pts, h_pts) = crate::platform::macos::window::list_windows()
+    .ok()
+    .and_then(|ws| ws.into_iter().find(|w| w.hwnd == handle.0).map(|w| (w.width as usize, w.height as usize)))
+    .unwrap_or((0, 0));
+  if w_pts > 0 && h_pts > 0 {
+    let scale: usize = 2; // Retina backing
+    unsafe {
+      config.setWidth(w_pts * scale);
+      config.setHeight(h_pts * scale);
+    }
   }
-  let display = displays.objectAtIndex(0);
-  let full = capture_display(&display)?;
 
-  // Crop to window bounds
-  let rect = core_graphics::geometry::CGRect::new(
-    &core_graphics::geometry::CGPoint::new(frame.origin.x, frame.origin.y),
-    &core_graphics::geometry::CGSize::new(frame.size.width, frame.size.height),
-  );
-  let cropped = full.cropped(rect)
-    .ok_or_else(|| anyhow::anyhow!("crop to window bounds failed"))?;
-  cg_image_to_png(&cropped)
+  let (tx, rx) = mpsc::channel();
+
+  let block = RcBlock::new(move |image: *mut SCKitCGImage, error: *mut NSError| {
+    if !image.is_null() {
+      let _ = tx.send(Ok(convert_cgimage(unsafe { &*image })));
+    } else {
+      let msg = if !error.is_null() {
+        format!("capture error: {}", unsafe { (*error).localizedDescription() })
+      } else {
+        "capture returned null image".to_string()
+      };
+      let _ = tx.send(Err(anyhow::anyhow!(msg)));
+    }
+  });
+
+  unsafe {
+    SCScreenshotManager::captureImageWithFilter_configuration_completionHandler(
+      &filter, &config, Some(&block),
+    );
+  }
+
+  let cg_image = match rx.recv_timeout(TIMEOUT) {
+    Ok(result) => result?,
+    Err(mpsc::RecvTimeoutError::Timeout) => return Err(anyhow::anyhow!("window capture timed out")),
+    Err(e) => return Err(anyhow::anyhow!("channel error: {e}")),
+  };
+
+  cg_image_to_png(&cg_image)
 }

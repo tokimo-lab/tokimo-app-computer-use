@@ -10,6 +10,7 @@ crate-type = ["lib"]
 [[bin]]
 name = "tokimo-app-computer-daemon"
 path = "src/daemon/main.rs"
+required-features = ["windows-daemon"]
 
 [[bin]]
 name = "tokimo-app-computer-use"
