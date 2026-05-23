@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-`tokimo-app-computer-use` — Rust 实现的 Windows 桌面自动化工具包，提供 CLI 和 Daemon 两种模式，控制鼠标、键盘、窗口、UI 元素、截屏及系统信息查询。
+`tokimo-app-computer-use` — Rust 实现的跨平台桌面自动化工具包，提供 CLI 和 Daemon 两种模式，控制鼠标、键盘、窗口、UI 元素、截屏及系统信息查询。支持 macOS 和 Windows，Linux 计划中。
 
 ## 构建与测试
 
@@ -17,37 +17,41 @@ cargo test -- --test-threads=1 # 串行运行（UI 自动化测试需要）
 cargo fmt                      # 格式化代码
 ```
 
-> 测试需要真实的 Windows 环境和 GUI 可用（Calculator 等应用会被启动）。CI 中需确保桌面会话存在。
+> 测试需要真实桌面环境（macOS / Windows），GUI 可用（Calculator 等应用会被启动）。CI 中仅运行 lib + bins 测试，集成测试需手动在本地执行。
 
 ## 架构
 
 ```
-┌─────────────┐    named pipe IPC     ┌──────────────────┐
-│  CLI (clap) │ ──────────────────────>│  Daemon (后台进程) │
-│ src/main.rs │  \\.\pipe\tokimo-app   │  daemon/main.rs  │
-└─────────────┘    JSON-RPC 协议       └───────┬──────────┘
-                                               │
-                                     ┌─────────▼─────────┐
-                                     │ WindowsPlatform    │
-                                     │ (PlatformProvider) │
-                                     ├───────────────────-┤
-                                     │ MouseControl       │
-                                     │ KeyboardControl    │
-                                     │ WindowManager      │
-                                     │ Element / Finder   │
-                                     │ ScreenCapture      │
-                                     │ ProcessManager     │
-                                     │ SystemInfoProvider │
-                                     │ BluetoothProvider  │
-                                     │ ServiceProvider    │
-                                     │ RegistryProvider   │
-                                     │ ...                │
-                                     └───────────────────-┘
+┌─────────────┐    IPC (named pipe / direct)  ┌──────────────────┐
+│  CLI (clap) │ ─────────────────────────────>│  Daemon (后台进程) │
+│ src/main.rs │                               │  daemon/main.rs   │
+└─────────────┘                               └───────┬──────────┘
+                                                      │
+                                            ┌─────────▼──────────┐
+                                            │  PlatformProvider   │
+                                            │  (14 sub-traits)    │
+                                            ├─────────────────────┤
+                                            │ MacPlatform   │ WindowsPlatform │
+                                            │ (macOS)       │ (Windows)       │
+                                            ├─────────────────────┤
+                                            │ MouseControl       │
+                                            │ KeyboardControl    │
+                                            │ WindowManager      │
+                                            │ ElementFinder      │
+                                            │ ScreenCapture      │
+                                            │ ProcessManager     │
+                                            │ SystemInfoProvider │
+                                            │ BluetoothProvider  │
+                                            │ ServiceProvider    │
+                                            │ RegistryProvider   │
+                                            │ AudioControl       │
+                                            │ ...                │
+                                            └────────────────────-┘
 ```
 
-- **CLI** — 解析命令后通过 named pipe 连接 Daemon（如 Daemon 未运行则自动启动），非 Windows 时回退到 `DirectExecutor` 直接调用
-- **Daemon** — 常驻进程，维护 `WindowsPlatform` 实例，接受 JSON 请求分派到 platform trait 方法
-- **Library** (`lib.rs`) — 导出 `platform::PlatformProvider` 复合 trait（组合 13+ 子 trait）、数据类型、错误类型、IPC 协议定义
+- **CLI** — 解析命令后通过 named pipe 连接 Daemon（Windows），或通过 `DirectExecutor` 直接调用 platform（macOS）
+- **Daemon** — 常驻进程，维护 platform 实例（`MacPlatform` 或 `WindowsPlatform`），接受 JSON 请求分派到 platform trait 方法
+- **Library** (`lib.rs`) — 导出 `platform::PlatformProvider` 复合 trait（组合 14 个子 trait）、数据类型、错误类型、IPC 协议定义。平台选择通过 `cfg` 属性在编译期决定
 
 ### IPC 协议
 
@@ -59,7 +63,7 @@ JSON 换行分隔，请求格式：`{ "id": "xxx", "method": "mouse.click", "par
 - Rust Edition 2024，`rustfmt.toml` 配置：2 空格缩进、120 字符宽度、item 级别 import 整理
 - 错误处理统一用 `anyhow`（`src/error.rs` re-export）
 - 数据类型定义在 `src/types.rs`，CLI 和 platform 共享
-- 新增 platform 功能：在 `src/platform/mod.rs` 添加 trait → `src/platform/windows/` 实现 → `src/cli/` 添加子命令 → `src/daemon/handler.rs` 注册 method 路由
+- 新增 platform 功能：在 `src/platform/mod.rs` 添加 trait → `src/platform/windows/` 和 `src/platform/macos/` 各自实现 → `src/cli/` 添加子命令 → `src/daemon/handler.rs` 注册 method 路由
 
 ## API 文档参考
 
@@ -78,7 +82,7 @@ JSON 换行分隔，请求格式：`{ "id": "xxx", "method": "mouse.click", "par
 | `windows` crate 文档 | https://microsoft.github.io/windows-docs-rs/ |
 | `windows` crate 源码 | https://github.com/microsoft/windows-rs |
 
-### macOS API (目前为 stub 实现)
+### macOS API
 
 | 资源 | 链接 |
 |---|---|
@@ -94,6 +98,12 @@ JSON 换行分隔，请求格式：`{ "id": "xxx", "method": "mouse.click", "par
 | crate | 用途 |
 |---|---|
 | `windows` 0.62 | Windows API 绑定（28 个 feature flag） |
+| `core-graphics` / `core-foundation` | macOS Core Graphics / Foundation |
+| `accessibility` / `accessibility-sys` | macOS Accessibility API |
+| `objc2` | macOS Objective-C 运行时 |
+| `coreaudio-rs` | macOS Core Audio |
+| `io-kit-sys` | macOS IOKit（硬件枚举） |
+| `btleplug` | macOS BLE 扫描 |
 | `clap` 4 | CLI 参数解析 |
 | `serde` / `serde_json` | IPC 协议序列化 |
 | `image` / `webp` | 截图编码（默认 WebP） |

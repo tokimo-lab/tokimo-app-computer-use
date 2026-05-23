@@ -1,74 +1,81 @@
 # tokimo-app-computer-use
 
-Rust 实现的 Windows 桌面自动化工具包，提供 CLI 和 Daemon 两种模式。
+Cross-platform desktop automation toolkit built in Rust. Provides both a CLI and a background Daemon for controlling mouse, keyboard, windows, UI elements, screenshots, and system information.
 
-## 功能
+## Features
 
-- **鼠标控制** — 移动、点击、拖拽
-- **键盘控制** — 按键输入、组合键
-- **窗口管理** — 枚举、聚焦、移动、调整大小
-- **UI 元素** — 通过 UI Automation 查找和操作控件
-- **截图** — GDI 截屏，支持 WebP/PNG/JPEG 编码
-- **系统信息** — CPU、GPU、内存、磁盘、网络、电池
-- **进程管理** — 列出、启动、终止进程
-- **服务管理** — Windows 服务查询与控制
-- **注册表** — 读写 Windows 注册表
-- **蓝牙** — 设备枚举与信息查询
-- **WiFi** — 网络扫描与连接信息
-- **USB** — 设备枚举
-- **打印机** — 列出打印机与打印任务
-- **音频** — 音频设备与音量控制
-- **启动项** — 开机自启管理
-- **软件** — 已安装软件列表
-- **终端** — Terminal/ConPTY 会话管理
+- **Mouse Control** — move, click, drag, scroll
+- **Keyboard Control** — type text, send key combinations
+- **Window Management** — enumerate, focus, move, resize
+- **UI Elements** — find and interact with controls via XPath
+- **Screenshot** — desktop and per-window capture (WebP/PNG/JPEG)
+- **System Info** — CPU, GPU, memory, disk, network, battery
+- **Process Management** — list, launch, terminate processes
+- **Service Management** — query and control OS services
+- **Registry** — read/write Windows Registry *(Windows only)*
+- **Bluetooth** — classic and BLE device scanning
+- **WiFi** — network scanning and connection info
+- **USB** — device enumeration
+- **Printer** — list printers and print documents
+- **Audio** — volume control and device management
+- **Startup** — manage startup items
+- **Software** — list installed software
+- **Terminal** — shell command execution
 
-## 架构
+## Architecture
 
 ```
-┌─────────────┐    named pipe IPC     ┌──────────────────┐
-│  CLI (clap) │ ──────────────────────>│  Daemon (后台进程) │
-│ src/main.rs │  \\.\pipe\tokimo-app   │  daemon/main.rs  │
-└─────────────┘    JSON-RPC 协议       └───────┬──────────┘
-                                               │
-                                     ┌─────────▼─────────┐
-                                     │ WindowsPlatform    │
-                                     │ (PlatformProvider) │
-                                     └───────────────────-┘
+┌─────────────┐    IPC (named pipe / direct)  ┌──────────────────┐
+│  CLI (clap) │ ─────────────────────────────>│  Daemon (bg proc) │
+│ src/main.rs │                               │  daemon/main.rs   │
+└─────────────┘                               └───────┬──────────┘
+                                                      │
+                                            ┌─────────▼──────────┐
+                                            │  PlatformProvider   │
+                                            │  (14 sub-traits)    │
+                                            ├─────────────────────┤
+                                            │ MacPlatform   │ WindowsPlatform │
+                                            │ (macOS)       │ (Windows)       │
+                                            └─────────────────────┘
 ```
 
-- **CLI** — 解析命令后通过 named pipe 连接 Daemon（未运行时自动启动）
-- **Daemon** — 常驻进程，接受 JSON 请求分派到 platform 实现
-- **Library** — 导出 `PlatformProvider` 复合 trait（13+ 子 trait）
+- **CLI** — parses commands, then connects to the Daemon via named pipe (Windows) or calls the platform directly (macOS/Linux)
+- **Daemon** — long-running process that maintains a platform instance and dispatches JSON-RPC requests
+- **Library** — exports the `PlatformProvider` composite trait (14 sub-traits), data types, and IPC protocol definitions
 
-## 构建
+## Building
 
 ```bash
 cargo build --release
 ```
 
-## 使用
+## Usage
 
 ```bash
-# 系统信息
+# System info
 tokimo-app system info
 
-# 鼠标点击
+# Mouse click at coordinates
 tokimo-app mouse click --x 100 --y 200
 
-# 截图
+# Take a screenshot
 tokimo-app screenshot --output screen.webp
 
-# 窗口列表
+# List windows
 tokimo-app window list
+
+# List processes
+tokimo-app process list
 ```
 
-## 平台支持
+## Platform Support
 
-| 平台 | 状态 |
-|---|---|
-| Windows | 完整实现 |
-| macOS | Stub（待实现） |
+| Platform | Status | Notes |
+|---|---|---|
+| Windows | Full | All features including Registry, Services, Bluetooth |
+| macOS | Full | Registry not available; some platform-specific differences |
+| Linux | Planned | Not yet implemented |
 
-## 许可证
+## License
 
 MIT
