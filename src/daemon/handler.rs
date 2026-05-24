@@ -195,7 +195,12 @@ pub fn dispatch<P: PlatformProvider + ?Sized>(
       let cx = elem.x() as f64 + elem.width() as f64 / 2.0;
       let cy = elem.y() as f64 + elem.height() as f64 / 2.0;
       ensure_foreground(platform, &scope)?;
-      let handle = platform.get_foreground_window()?;
+      // elem.x()/y() are screen-absolute pixels on both macOS (AX) and Windows
+      // (UIA BoundingRectangle), so pass WindowHandle(0) to dispatch as
+      // absolute-screen click. Passing the foreground HWND would route through
+      // the Windows window-relative click path which expects 0-1 normalized
+      // coords and rejects pixel values.
+      let handle = WindowHandle(0);
       Ok(json!(platform.click(&handle, cx, cy, button, double)?))
     }
     "element.type" => {
