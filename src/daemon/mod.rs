@@ -1,3 +1,4 @@
+pub mod cache;
 pub mod handler;
 pub mod protocol;
 pub mod server;
@@ -14,5 +15,6 @@ use crate::create_platform;
 pub fn run_daemon() -> std::io::Result<()> {
   let platform = create_platform();
   let platform = Arc::new(platform);
-  server::run_server(platform)
+  let cache = Arc::new(cache::SnapshotCache::new());
+  server::run_server(platform, cache)
 }

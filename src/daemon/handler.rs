@@ -1,10 +1,11 @@
+use super::cache::SnapshotCache;
 use super::protocol::{Request, Response};
 use crate::platform::PlatformProvider;
 use crate::types::*;
 use serde_json::json;
 
-pub fn handle_request<P: PlatformProvider + ?Sized>(platform: &P, req: Request) -> Response {
-  let result = dispatch(platform, &req.method, &req.params);
+pub fn handle_request<P: PlatformProvider + ?Sized>(platform: &P, cache: &SnapshotCache, req: Request) -> Response {
+  let result = dispatch(platform, cache, &req.method, &req.params);
   match result {
     Ok(value) => Response::success(req.id, value),
     Err(e) => Response::error(req.id as u32, -1, e.to_string()),
@@ -13,6 +14,7 @@ pub fn handle_request<P: PlatformProvider + ?Sized>(platform: &P, req: Request) 
 
 pub fn dispatch<P: PlatformProvider + ?Sized>(
   platform: &P,
+  cache: &SnapshotCache,
   method: &str,
   params: &serde_json::Value,
 ) -> crate::error::Result<serde_json::Value> {
@@ -182,15 +184,36 @@ pub fn dispatch<P: PlatformProvider + ?Sized>(
     "element.query" => {
       let scope = parse_scope(platform, params)?;
       let q = parse_query(params);
-      let elements = platform.query_elements(scope, &q)?;
-      let infos: Vec<serde_json::Value> = elements.iter().map(elem_to_json).collect();
+      let elements = platform.query_elements(scope.clone(), &q)?;
+      let infos: Vec<serde_json::Value> = elements
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+          let mut v = elem_to_json(e);
+          v["ref"] = json!(format!("e{}", i + 1));
+          v
+        })
+        .collect();
+      cache.replace(scope, &elements);
       Ok(json!(infos))
     }
     "element.click" => {
-      let scope = parse_scope(platform, params)?;
-      let q = parse_query(params);
       let button = req_button(params)?;
       let double = params["double"].as_bool().unwrap_or(false);
+
+      // ref-based fast path: re-resolve the descriptor saved by the last
+      // `element.query` and act on the freshly-found element.
+      if let Some(ref_id) = params["ref"].as_str() {
+        let (scope, elem) = cache.resolve(platform, ref_id)?;
+        let cx = elem.x() as f64 + elem.width() as f64 / 2.0;
+        let cy = elem.y() as f64 + elem.height() as f64 / 2.0;
+        ensure_foreground(platform, &scope)?;
+        let handle = WindowHandle(0);
+        return Ok(json!(platform.click(&handle, cx, cy, button, double)?));
+      }
+
+      let scope = parse_scope(platform, params)?;
+      let q = parse_query(params);
       let elem = platform.query_one(scope.clone(), &q)?;
       let cx = elem.x() as f64 + elem.width() as f64 / 2.0;
       let cy = elem.y() as f64 + elem.height() as f64 / 2.0;
@@ -204,11 +227,25 @@ pub fn dispatch<P: PlatformProvider + ?Sized>(
       Ok(json!(platform.click(&handle, cx, cy, button, double)?))
     }
     "element.type" => {
-      let scope = parse_scope(platform, params)?;
-      let q = parse_query(params);
       let value = req_str(params, "value")?;
       let enter = params["enter"].as_bool().unwrap_or(false);
       let clear = params["clear"].as_bool().unwrap_or(false);
+
+      // ref-based fast path.
+      if let Some(ref_id) = params["ref"].as_str() {
+        let (scope, elem) = cache.resolve(platform, ref_id)?;
+        ensure_foreground(platform, &scope)?;
+        let _ = elem.set_focused();
+        let pos = Some((
+          elem.x() as f64 + elem.width() as f64 / 2.0,
+          elem.y() as f64 + elem.height() as f64 / 2.0,
+        ));
+        platform.type_text(scope, value, pos, enter, clear)?;
+        return Ok(json!(null));
+      }
+
+      let scope = parse_scope(platform, params)?;
+      let q = parse_query(params);
 
       // Find all candidates and prefer one with a sane on-screen rect.
       // Qt apps often expose multiple "Edit"-like elements; some are off-screen
@@ -264,6 +301,14 @@ pub fn dispatch<P: PlatformProvider + ?Sized>(
       Ok(json!(platform.probe_at_position(x, y)?))
     }
     "element.activate" => {
+      // ref-based fast path.
+      if let Some(ref_id) = params["ref"].as_str() {
+        let (scope, elem) = cache.resolve(platform, ref_id)?;
+        ensure_foreground(platform, &scope)?;
+        elem.confirm()?;
+        return Ok(json!(null));
+      }
+
       let scope = parse_scope(platform, params)?;
       let q = parse_query(params);
       let elem = platform.query_one(scope.clone(), &q)?;

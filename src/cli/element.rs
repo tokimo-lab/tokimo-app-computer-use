@@ -10,6 +10,11 @@ use super::{CommandExecutor, print_input_result, scope::WindowSel};
 /// * Every command that talks to a UI scope accepts the common `-w / -a` selector
 ///   triple via `WindowSel`. With no selector, the foreground window is used.
 /// * `find` is the flat, table-style query — use it to discover what's on screen.
+///   Every row gets a stable `[REF=eN]` id you can use with `click --ref eN` /
+///   `type --ref eN` / `press --ref eN` without re-specifying role/text/nth.
+///   Refs are valid until the next `element find` call (snapshot is persisted
+///   to disk so they survive between CLI invocations). Recommended agent flow:
+///   `element find -w <H>` → pick the ref you want → `element click --ref eN`.
 /// * `tree` is the hierarchical view — use it when you need parent/child context.
 ///   Both honor the SAME filter flags (`--role / --text / --exact`) so the agent
 ///   only has to learn one set of vocab.
@@ -20,7 +25,7 @@ use super::{CommandExecutor, print_input_result, scope::WindowSel};
 ///   search results) is ON by default. Pass `--no-hit-test` to skip it when speed
 ///   matters and you trust the target app exposes a normal AX tree.
 /// * Click / type / press all accept the same filter vocab; they internally use
-///   the FIRST match by default, or `--nth N` to pick the Nth.
+///   the FIRST match by default, or `--nth N` to pick the Nth. Or just `--ref eN`.
 #[derive(Subcommand, Debug)]
 pub enum ElementAction {
   /// Find UI elements matching a query. Outputs a flat table.
@@ -80,6 +85,10 @@ pub enum ElementAction {
   Click {
     #[command(flatten)]
     sel: WindowSel,
+    /// Use a ref id (e.g. `e3`) from the last `element find` snapshot.
+    /// When set, --role/--text/--nth are ignored.
+    #[arg(long, conflicts_with_all = &["role", "text", "exact", "nth"])]
+    r#ref: Option<String>,
     #[arg(long)]
     role: Option<String>,
     #[arg(long)]
@@ -102,6 +111,9 @@ pub enum ElementAction {
     value: String,
     #[command(flatten)]
     sel: WindowSel,
+    /// Use a ref id (e.g. `e3`) from the last `element find` snapshot.
+    #[arg(long, conflicts_with_all = &["text", "exact", "nth"])]
+    r#ref: Option<String>,
     /// Default role for typing is "Edit"; override here if needed
     #[arg(long, default_value = "Edit")]
     role: String,
@@ -124,6 +136,9 @@ pub enum ElementAction {
   Press {
     #[command(flatten)]
     sel: WindowSel,
+    /// Use a ref id (e.g. `e3`) from the last `element find` snapshot.
+    #[arg(long, conflicts_with_all = &["role", "text", "exact", "nth"])]
+    r#ref: Option<String>,
     #[arg(long)]
     role: Option<String>,
     #[arg(long)]
@@ -198,6 +213,7 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: ElementAction) -> Result<
     }
     ElementAction::Click {
       sel,
+      r#ref,
       role,
       text,
       exact,
@@ -207,8 +223,12 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: ElementAction) -> Result<
       no_hit_test,
     } => {
       let mut params = sel.to_json_scope();
-      add_query_params(&mut params, role, text, exact, None, false, no_hit_test);
-      params["index"] = json!(nth);
+      if let Some(rid) = r#ref {
+        params["ref"] = json!(rid);
+      } else {
+        add_query_params(&mut params, role, text, exact, None, false, no_hit_test);
+        params["index"] = json!(nth);
+      }
       params["button"] = json!(button);
       params["double"] = json!(double);
       let r = executor.call("element.click", params)?;
@@ -217,6 +237,7 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: ElementAction) -> Result<
     ElementAction::Type {
       value,
       sel,
+      r#ref,
       role,
       text,
       exact,
@@ -227,8 +248,12 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: ElementAction) -> Result<
     } => {
       let mut params = sel.to_json_scope();
       params["value"] = json!(value);
-      add_query_params(&mut params, Some(role), text, exact, None, false, no_hit_test);
-      params["index"] = json!(nth);
+      if let Some(rid) = r#ref {
+        params["ref"] = json!(rid);
+      } else {
+        add_query_params(&mut params, Some(role), text, exact, None, false, no_hit_test);
+        params["index"] = json!(nth);
+      }
       params["enter"] = json!(enter);
       params["clear"] = json!(clear);
       let r = executor.call("element.type", params)?;
@@ -236,6 +261,7 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: ElementAction) -> Result<
     }
     ElementAction::Press {
       sel,
+      r#ref,
       role,
       text,
       exact,
@@ -243,8 +269,12 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: ElementAction) -> Result<
       no_hit_test,
     } => {
       let mut params = sel.to_json_scope();
-      add_query_params(&mut params, role, text, exact, None, false, no_hit_test);
-      params["index"] = json!(nth);
+      if let Some(rid) = r#ref {
+        params["ref"] = json!(rid);
+      } else {
+        add_query_params(&mut params, role, text, exact, None, false, no_hit_test);
+        params["index"] = json!(nth);
+      }
       executor.call("element.activate", params)?;
       println!("ok");
     }
@@ -258,6 +288,7 @@ fn print_elements_limited(value: &serde_json::Value, max: usize) {
       return;
     }
     let mut t = super::Table::new(vec![
+      ("REF", 5),
       ("TYPE", 14),
       ("NAME", 22),
       ("DESC", 28),
@@ -273,6 +304,7 @@ fn print_elements_limited(value: &serde_json::Value, max: usize) {
       let help = e["help_text"].as_str().unwrap_or("");
       let aid = e["automation_id"].as_str().unwrap_or("");
       let cls = e["class_name"].as_str().unwrap_or("");
+      let r = e["ref"].as_str().unwrap_or("");
       if ctrl == "?" && name.is_empty() && aid.is_empty() && cls.is_empty() && help.is_empty() {
         continue;
       }
@@ -286,6 +318,7 @@ fn print_elements_limited(value: &serde_json::Value, max: usize) {
         name
       };
       t.row(vec![
+        r.to_string(),
         ctrl.to_string(),
         display_name.to_string(),
         help.to_string(),

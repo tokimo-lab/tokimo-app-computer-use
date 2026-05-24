@@ -47,6 +47,7 @@ pub(crate) trait CommandExecutor {
 #[cfg(not(windows))]
 struct DirectExecutor {
   platform: Box<dyn PlatformProvider + Send + Sync>,
+  cache: crate::daemon::cache::SnapshotCache,
 }
 
 #[cfg(not(windows))]
@@ -54,6 +55,7 @@ impl DirectExecutor {
   fn new(platform: impl PlatformProvider + Send + Sync + 'static) -> Self {
     Self {
       platform: Box::new(platform),
+      cache: crate::daemon::cache::SnapshotCache::new(),
     }
   }
 }
@@ -61,7 +63,7 @@ impl DirectExecutor {
 #[cfg(not(windows))]
 impl CommandExecutor for DirectExecutor {
   fn call(&mut self, method: &str, params: Value) -> Result<Value> {
-    crate::daemon::handler::dispatch(self.platform.as_ref(), method, &params)
+    crate::daemon::handler::dispatch(self.platform.as_ref(), &self.cache, method, &params)
   }
 }
 

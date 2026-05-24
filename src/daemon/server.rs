@@ -2,20 +2,25 @@ use std::sync::Arc;
 
 use crate::platform::PlatformProvider;
 
+use super::cache::SnapshotCache;
+
 /// IPC pipe name on Windows
 #[cfg(windows)]
 pub const PIPE_NAME: &str = r"\\.\pipe\tokimo-app-computer-daemon";
 
 /// Start the IPC server, blocking the current thread.
 /// Each incoming connection is handled in a new thread.
-pub fn run_server<P: PlatformProvider + Send + Sync + 'static>(platform: Arc<P>) -> std::io::Result<()> {
+pub fn run_server<P: PlatformProvider + Send + Sync + 'static>(
+  platform: Arc<P>,
+  cache: Arc<SnapshotCache>,
+) -> std::io::Result<()> {
   #[cfg(windows)]
   {
-    run_named_pipe_server(platform)
+    run_named_pipe_server(platform, cache)
   }
   #[cfg(not(windows))]
   {
-    let _ = platform;
+    let _ = (platform, cache);
     Err(std::io::Error::new(
       std::io::ErrorKind::Unsupported,
       "IPC server not yet implemented for this platform",
@@ -24,7 +29,10 @@ pub fn run_server<P: PlatformProvider + Send + Sync + 'static>(platform: Arc<P>)
 }
 
 #[cfg(windows)]
-fn run_named_pipe_server<P: PlatformProvider + Send + Sync + 'static>(platform: Arc<P>) -> std::io::Result<()> {
+fn run_named_pipe_server<P: PlatformProvider + Send + Sync + 'static>(
+  platform: Arc<P>,
+  cache: Arc<SnapshotCache>,
+) -> std::io::Result<()> {
   use windows::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
   use windows::Win32::Storage::FileSystem::*;
   use windows::Win32::System::Pipes::*;
@@ -67,6 +75,7 @@ fn run_named_pipe_server<P: PlatformProvider + Send + Sync + 'static>(platform: 
     }
 
     let platform = platform.clone();
+    let cache = cache.clone();
     let raw_handle = pipe_handle.0 as usize;
     std::thread::spawn(move || {
       use super::handler::handle_request;
@@ -96,7 +105,7 @@ fn run_named_pipe_server<P: PlatformProvider + Send + Sync + 'static>(platform: 
           }
         };
 
-        let resp = handle_request(platform.as_ref(), request);
+        let resp = handle_request(platform.as_ref(), cache.as_ref(), request);
         let mut resp_json = serde_json::to_string(&resp).unwrap();
         resp_json.push('\n');
         let _ = file.write_all(resp_json.as_bytes());
