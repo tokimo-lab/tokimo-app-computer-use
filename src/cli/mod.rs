@@ -22,13 +22,11 @@ mod window;
 use std::cmp::max;
 use std::fmt::Write as _;
 
-use anyhow::Result;
+use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
 use serde_json::Value;
 use tokimo_bus_cli::TokimoAuthArgs;
 
-#[cfg(windows)]
-use anyhow::{Context, anyhow};
 #[cfg(windows)]
 use std::io::{BufRead, BufReader, Write};
 
@@ -314,6 +312,17 @@ pub enum Command {
     #[command(subcommand)]
     action: software::SoftwareAction,
   },
+  /// Browser automation via vendored agent-browser (CDP)
+  ///
+  /// All args after `browser` are passed through verbatim to the bundled
+  /// `agent-browser` binary. Run `tokimo-app-computer-use browser --help`
+  /// to see its full command set.
+  #[command(trailing_var_arg = true, allow_hyphen_values = true, disable_help_flag = true)]
+  Browser {
+    /// Args forwarded to agent-browser (e.g. `open https://example.com`).
+    #[arg(value_name = "ARGS")]
+    args: Vec<String>,
+  },
 }
 
 // ── CLI entry point ──
@@ -332,6 +341,11 @@ pub fn run_cli(cli: Cli) -> Result<()> {
       return Ok(());
     }
   };
+
+  // Browser passthrough — does not need our daemon
+  if let Command::Browser { args } = command {
+    return run_browser_passthrough(args);
+  }
 
   #[cfg(windows)]
   let mut executor: Box<dyn CommandExecutor> = Box::new(try_connect_or_spawn_daemon()?);
@@ -362,7 +376,71 @@ pub fn run_cli(cli: Cli) -> Result<()> {
     Command::Battery { action } => battery::cmd(&mut *executor, action),
     Command::Registry { action } => registry::cmd(&mut *executor, action),
     Command::Software { action } => software::cmd(&mut *executor, action),
+    Command::Browser { .. } => unreachable!("Browser handled above"),
   }
+}
+
+// ── Browser passthrough ──
+//
+// Invokes the vendored agent-browser library directly (no subprocess), and
+// injects sensible defaults so the user gets:
+//   - a visible browser window (--headed) instead of headless
+//   - a persistent profile directory (--profile <fixed-path>) so logins / cookies survive across runs
+// We also block the `install` and `upgrade` subcommands — agent-browser ships a
+// Chrome-for-Testing downloader and a self-updater, neither of which makes
+// sense when shipped inside tokimo-app-computer-use.
+
+fn run_browser_passthrough(args: Vec<String>) -> Result<()> {
+  // Block dangerous / nonsensical subcommands.
+  if let Some(sub) = args.iter().find(|a| !a.starts_with('-')) {
+    match sub.as_str() {
+      "install" => {
+        return Err(anyhow!(
+          "`browser install` is disabled in tokimo-app-computer-use (we do not auto-download Chrome). \
+           Install Chrome / Edge / Brave via your OS package manager or vendor website."
+        ));
+      }
+      "upgrade" => {
+        return Err(anyhow!(
+          "`browser upgrade` is disabled in tokimo-app-computer-use. \
+           Upgrades happen via tokimo-app-computer-use releases."
+        ));
+      }
+      _ => {}
+    }
+  }
+
+  // Inject defaults if user did not provide them.
+  let has_flag = |name: &str| args.iter().any(|a| a == name || a.starts_with(&format!("{name}=")));
+  let mut injected: Vec<String> = Vec::new();
+
+  if !has_flag("--headed") && std::env::var("AGENT_BROWSER_HEADED").is_err() {
+    injected.push("--headed".to_string());
+  }
+
+  if !has_flag("--profile") && std::env::var("AGENT_BROWSER_PROFILE").is_err() {
+    let profile_dir = default_browser_profile_dir()?;
+    if !profile_dir.exists() {
+      std::fs::create_dir_all(&profile_dir)
+        .with_context(|| format!("failed to create default browser profile dir {}", profile_dir.display()))?;
+    }
+    injected.push("--profile".to_string());
+    injected.push(profile_dir.to_string_lossy().into_owned());
+  }
+
+  // agent_browser::run expects argv-style: argv[0] is the program name and is skipped internally.
+  let mut full = Vec::with_capacity(1 + injected.len() + args.len());
+  full.push("agent-browser".to_string());
+  full.extend(injected);
+  full.extend(args);
+
+  agent_browser::run(full);
+  Ok(())
+}
+
+fn default_browser_profile_dir() -> Result<std::path::PathBuf> {
+  let base = dirs::home_dir().context("cannot resolve home directory")?;
+  Ok(base.join(".tokimo-browser").join("profile"))
 }
 
 // ── Common helpers ──

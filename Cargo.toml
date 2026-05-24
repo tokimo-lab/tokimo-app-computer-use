@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "vendor/agent-browser/cli"]
+resolver = "2"
+
 [package]
 name = "tokimo-app-computer-use"
 version = "0.1.0"
@@ -32,6 +36,8 @@ clap = { version = "4", features = ["derive", "env"] }
 tokimo-bus-client = { git = "https://github.com/tokimo-lab/tokimo-bus.git", rev = "80063cb4391c5249df9cd3b570b1eabed64c3843" }
 tokimo-bus-protocol = { git = "https://github.com/tokimo-lab/tokimo-bus.git", rev = "80063cb4391c5249df9cd3b570b1eabed64c3843" }
 tokimo-bus-cli = { git = "https://github.com/tokimo-lab/tokimo-bus.git", rev = "80063cb4391c5249df9cd3b570b1eabed64c3843" }
+agent-browser = { path = "vendor/agent-browser/cli" }
+dirs = "5"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [

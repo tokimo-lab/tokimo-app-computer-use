@@ -19,6 +19,15 @@ fn bootstrap_macos() {
 fn bootstrap_macos() {}
 
 fn main() {
+  // When invoked by agent-browser as a spawned daemon/dashboard process,
+  // short-circuit BEFORE clap parses (clap would reject the empty/foreign
+  // argv it inherits from the parent). The agent_browser::run entrypoint
+  // detects AGENT_BROWSER_DAEMON / AGENT_BROWSER_DASHBOARD itself.
+  if std::env::var("AGENT_BROWSER_DAEMON").is_ok() || std::env::var("AGENT_BROWSER_DASHBOARD").is_ok() {
+    agent_browser::run(std::env::args().collect());
+    return;
+  }
+
   bootstrap_macos();
   let cli = Cli::parse();
 
