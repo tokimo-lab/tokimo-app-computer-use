@@ -46,6 +46,12 @@ impl MouseControl for WindowsPlatform {
     button: MouseButton,
     double_click: bool,
   ) -> Result<InputResult> {
+    if handle.0 == 0 {
+      let sx = x as i32;
+      let sy = y as i32;
+      mouse::click_by_pos(sx, sy, button, double_click)?;
+      return Ok(InputResult::success(sx, sy, sx, sy));
+    }
     mouse::click_by_hwnd_pos(handle.0, x, y, button, double_click)
   }
   fn drag(
@@ -68,13 +74,50 @@ impl MouseControl for WindowsPlatform {
 impl KeyboardControl for WindowsPlatform {
   fn type_text(
     &self,
-    _scope: ElementScope,
-    _text: &str,
-    _position: Option<(f64, f64)>,
-    _enter: bool,
-    _clear: bool,
+    scope: ElementScope,
+    text: &str,
+    position: Option<(f64, f64)>,
+    enter: bool,
+    clear: bool,
   ) -> Result<()> {
-    todo!("windows: type_text")
+    // Resolve scope → pid → focus that app; this is what the macOS impl does
+    // and the daemon's ensure_foreground() already does it for most methods,
+    // but we re-do it here so callers using KeyboardControl directly behave
+    // the same way.
+    match &scope {
+      ElementScope::Window(h) => {
+        wnd::bring_window_to_front(HWND(h.0 as *mut core::ffi::c_void));
+      }
+      ElementScope::Application(pid) => {
+        if let Ok(wins) = wnd::get_all_windows_by_process_id_internal(*pid)
+          && let Some(w) = wins.into_iter().next()
+        {
+          wnd::bring_window_to_front(HWND(w.hwnd as *mut core::ffi::c_void));
+        }
+      }
+      ElementScope::Foreground => {}
+    }
+    std::thread::sleep(std::time::Duration::from_millis(120));
+
+    if let Some((px, py)) = position {
+      mouse::click_by_pos(px as i32, py as i32, MouseButton::Left, false)?;
+      std::thread::sleep(std::time::Duration::from_millis(80));
+    }
+
+    if clear {
+      keyboard::send_keys(vec![KeyCode::A], Some(vec![KeyCode::Ctrl]))?;
+      std::thread::sleep(std::time::Duration::from_millis(50));
+      keyboard::send_keys(vec![KeyCode::Delete], None)?;
+      std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    keyboard::send_text(text)?;
+
+    if enter {
+      std::thread::sleep(std::time::Duration::from_millis(50));
+      keyboard::send_keys(vec![KeyCode::Return], None)?;
+    }
+    Ok(())
   }
   fn send_keys(&self, keys: &[KeyCode], modifiers: Option<&[KeyCode]>) -> Result<()> {
     keyboard::send_keys(keys.to_vec(), modifiers.map(|m| m.to_vec()))
@@ -121,7 +164,19 @@ impl WindowManager for WindowsPlatform {
     )
   }
   fn find_windows_by_process(&self, pattern: &str) -> Result<Vec<WindowInfo>> {
-    todo!("windows: find_windows_by_process")
+    let all = wnd::fetch_all_windows()?;
+    let pat = pattern.to_lowercase();
+    Ok(
+      all
+        .into_iter()
+        .filter(|w| {
+          if wnd::is_system_window(&w.title, &w.process_name) {
+            return false;
+          }
+          w.process_name.to_lowercase().contains(&pat)
+        })
+        .collect(),
+    )
   }
   fn get_windows_by_process_id(&self, pid: u32) -> Result<Vec<WindowInfo>> {
     wnd::get_all_windows_by_process_id_internal(pid)
@@ -130,7 +185,8 @@ impl WindowManager for WindowsPlatform {
     // Best-effort: focus the first window of this pid.
     let wins = wnd::get_all_windows_by_process_id_internal(pid)?;
     if let Some(w) = wins.into_iter().next() {
-      wnd::focus_window_by_handle(w.hwnd)
+      wnd::bring_window_to_front(HWND(w.hwnd as *mut core::ffi::c_void));
+      Ok(())
     } else {
       Err(anyhow::anyhow!("no windows for pid {pid}"))
     }
@@ -139,7 +195,7 @@ impl WindowManager for WindowsPlatform {
     wnd::get_window_title_by_handle(handle.0)
   }
   fn get_foreground_window(&self) -> Result<WindowHandle> {
-    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    use ::windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
     let fg = unsafe { GetForegroundWindow() };
     if fg.is_invalid() {
       return Err(anyhow::anyhow!("no foreground window"));
@@ -172,14 +228,14 @@ impl WindowManager for WindowsPlatform {
 
 // === ElementFinder ===
 impl ElementFinder for WindowsPlatform {
-  fn query_elements(&self, _scope: ElementScope, _q: &ElementQuery) -> Result<Vec<Box<dyn Element>>> {
-    todo!("windows: query_elements")
+  fn query_elements(&self, scope: ElementScope, q: &ElementQuery) -> Result<Vec<Box<dyn Element>>> {
+    elements::query::query_elements(&scope, q)
   }
-  fn query_one(&self, _scope: ElementScope, _q: &ElementQuery) -> Result<Box<dyn Element>> {
-    todo!("windows: query_one")
+  fn query_one(&self, scope: ElementScope, q: &ElementQuery) -> Result<Box<dyn Element>> {
+    elements::query::query_one(&scope, q)
   }
-  fn find_by_xpath(&self, _scope: ElementScope, _xpath: &str) -> Result<Vec<Box<dyn Element>>> {
-    todo!("windows: find_by_xpath")
+  fn find_by_xpath(&self, scope: ElementScope, xpath: &str) -> Result<Vec<Box<dyn Element>>> {
+    elements::query::find_by_xpath(&scope, xpath)
   }
 }
 
@@ -191,17 +247,11 @@ impl UiTreeInspector for WindowsPlatform {
   fn get_page_source_verbose(&self, handle: &WindowHandle) -> Result<String> {
     elements::source::get_page_source_from_hwnd(handle.0)
   }
-  fn render_tree(&self, scope: ElementScope, _query: &ElementQuery) -> Result<String> {
-    // TODO(windows): wire to query-based renderer (phase 2). For now fall back
-    // to the legacy page source dump using whichever window the scope resolves to.
-    let handle = match scope {
-      ElementScope::Window(h) => h,
-      _ => self.get_foreground_window()?,
-    };
-    elements::source::get_page_source_from_hwnd(handle.0)
+  fn render_tree(&self, scope: ElementScope, query: &ElementQuery) -> Result<String> {
+    elements::query::render_tree(&scope, query)
   }
-  fn probe_at_position(&self, _x: i32, _y: i32) -> Result<String> {
-    Err(anyhow::anyhow!("probe_at_position not implemented for Windows"))
+  fn probe_at_position(&self, x: i32, y: i32) -> Result<String> {
+    elements::query::probe_at_position(x, y)
   }
 }
 
@@ -220,8 +270,62 @@ impl ProcessManager for WindowsPlatform {
   fn launch_app(&self, path: &str, wait_timeout_ms: u32) -> Result<u32> {
     process::launch_application_and_get_process_id(path, wait_timeout_ms)
   }
-  fn launch_app_async(&self, _path_or_bundle: &str, _wait: bool) -> Result<u32> {
-    todo!("windows: launch_app_async")
+  fn launch_app_async(&self, path_or_bundle: &str, wait: bool) -> Result<u32> {
+    // 1. Look-up existing process by name first (idempotent — many apps are
+    //    single-instance and just bring an existing window forward).
+    let derived_name = if path_or_bundle.to_lowercase().ends_with(".exe") {
+      std::path::Path::new(path_or_bundle)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| path_or_bundle.to_string())
+    } else {
+      // Treat as bare name; try both `name` and `name.exe`.
+      path_or_bundle.to_string()
+    };
+    let candidates = if derived_name.to_lowercase().ends_with(".exe") {
+      vec![derived_name.clone()]
+    } else {
+      vec![format!("{derived_name}.exe"), derived_name.clone()]
+    };
+    for c in &candidates {
+      if let Ok(pids) = process::get_processes_by_name(c)
+        && let Some(pid) = pids.into_iter().next()
+      {
+        return Ok(pid);
+      }
+    }
+
+    // 2. Resolve path: direct path > App Paths registry.
+    let resolved_path = if path_or_bundle.contains('\\') || path_or_bundle.contains('/') {
+      path_or_bundle.to_string()
+    } else {
+      // Look up HKLM\Software\Microsoft\Windows\CurrentVersion\App Paths\<name>.exe
+      let exe_name = if derived_name.to_lowercase().ends_with(".exe") {
+        derived_name.clone()
+      } else {
+        format!("{derived_name}.exe")
+      };
+      let key = format!("HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\{exe_name}");
+      match registry::read_value(&key, None) {
+        Ok((_, v)) if !v.is_empty() => v,
+        _ => {
+          // Try WOW6432Node variant (32-bit installers register there).
+          let key2 = format!("HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\App Paths\\{exe_name}");
+          match registry::read_value(&key2, None) {
+            Ok((_, v)) if !v.is_empty() => v,
+            _ => {
+              return Err(anyhow::anyhow!(
+                "could not resolve '{path_or_bundle}' to an executable (no path, no running process, no App Paths entry)"
+              ));
+            }
+          }
+        }
+      }
+    };
+
+    let timeout_ms = if wait { 15_000 } else { 3_000 };
+    process::launch_application_and_get_process_id(&resolved_path, timeout_ms)
   }
   fn terminate_app(&self, pid: u32) -> Result<bool> {
     process::terminate_application(pid)
@@ -239,7 +343,7 @@ impl ProcessManager for WindowsPlatform {
     process::get_process_info(pid)
   }
   fn resolve_app_pid(&self, name: &str) -> Result<Option<u32>> {
-    Ok(process::get_process_ids_by_name(name)?.into_iter().next())
+    Ok(process::get_processes_by_name(name)?.into_iter().next())
   }
 }
 

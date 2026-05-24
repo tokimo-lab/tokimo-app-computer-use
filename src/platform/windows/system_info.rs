@@ -759,6 +759,7 @@ pub fn get_system_info() -> Result<SystemInfo> {
     startup_entries: enumerate_startup_entries(),
     printers: list_printers().unwrap_or_default(),
     usbs: enumerate_usb_devices(),
+    ..Default::default()
   })
 }
 

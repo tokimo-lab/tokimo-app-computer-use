@@ -30,12 +30,20 @@ pub enum ScreenshotAction {
 
 pub fn cmd(executor: &mut dyn CommandExecutor, action: ScreenshotAction) -> Result<()> {
   match action {
-    ScreenshotAction::Desktop { format, quality, output } => {
-      let result =
-        executor.call("screenshot.desktop", json!({"format": format, "quality": quality}))?;
+    ScreenshotAction::Desktop {
+      format,
+      quality,
+      output,
+    } => {
+      let result = executor.call("screenshot.desktop", json!({"format": format, "quality": quality}))?;
       save_screenshot(&result, output, &format)?;
     }
-    ScreenshotAction::Window { sel, format, quality, output } => {
+    ScreenshotAction::Window {
+      sel,
+      format,
+      quality,
+      output,
+    } => {
       let mut params = sel.to_json_scope();
       params["format"] = json!(format);
       params["quality"] = json!(quality);

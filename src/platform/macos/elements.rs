@@ -109,30 +109,27 @@ impl MacElement {
       .map(|s| s.to_string())
       .unwrap_or_default();
 
-    let cached_value = element
-      .attribute(&AXAttribute::value())
-      .ok()
-      .and_then(|v| {
-        if v.instance_of::<core_foundation::string::CFString>() {
-          let s: core_foundation::string::CFString =
-            unsafe { core_foundation::base::TCFType::wrap_under_get_rule(v.as_CFTypeRef() as *const _) };
-          Some(s.to_string())
-        } else if v.instance_of::<core_foundation::number::CFNumber>() {
-          // BUG-17: handle CFNumber values (sliders, progress bars, etc.)
-          let n: core_foundation::number::CFNumber =
-            unsafe { core_foundation::base::TCFType::wrap_under_get_rule(v.as_CFTypeRef() as *const _) };
-          n.to_i64()
-            .map(|i| i.to_string())
-            .or_else(|| n.to_f64().map(|f| f.to_string()))
-        } else if v.instance_of::<core_foundation::boolean::CFBoolean>() {
-          // BUG-17: handle CFBoolean values (checkboxes, toggles, etc.)
-          let b: core_foundation::boolean::CFBoolean =
-            unsafe { core_foundation::base::TCFType::wrap_under_get_rule(v.as_CFTypeRef() as *const _) };
-          Some(bool::from(b).to_string())
-        } else {
-          None
-        }
-      });
+    let cached_value = element.attribute(&AXAttribute::value()).ok().and_then(|v| {
+      if v.instance_of::<core_foundation::string::CFString>() {
+        let s: core_foundation::string::CFString =
+          unsafe { core_foundation::base::TCFType::wrap_under_get_rule(v.as_CFTypeRef() as *const _) };
+        Some(s.to_string())
+      } else if v.instance_of::<core_foundation::number::CFNumber>() {
+        // BUG-17: handle CFNumber values (sliders, progress bars, etc.)
+        let n: core_foundation::number::CFNumber =
+          unsafe { core_foundation::base::TCFType::wrap_under_get_rule(v.as_CFTypeRef() as *const _) };
+        n.to_i64()
+          .map(|i| i.to_string())
+          .or_else(|| n.to_f64().map(|f| f.to_string()))
+      } else if v.instance_of::<core_foundation::boolean::CFBoolean>() {
+        // BUG-17: handle CFBoolean values (checkboxes, toggles, etc.)
+        let b: core_foundation::boolean::CFBoolean =
+          unsafe { core_foundation::base::TCFType::wrap_under_get_rule(v.as_CFTypeRef() as *const _) };
+        Some(bool::from(b).to_string())
+      } else {
+        None
+      }
+    });
 
     let cached_position = element
       .attribute(&AXAttribute::new(&cfstr("AXPosition")))
@@ -172,11 +169,7 @@ fn extract_point_from_axvalue(val: &core_foundation::base::CFType) -> Option<(f6
       kAXValueTypeCGPoint,
       &mut point as *mut _ as *mut _,
     );
-    if ok {
-      Some((point.x, point.y))
-    } else {
-      None
-    }
+    if ok { Some((point.x, point.y)) } else { None }
   }
 }
 
@@ -193,11 +186,7 @@ fn extract_size_from_axvalue(val: &core_foundation::base::CFType) -> Option<(f64
       kAXValueTypeCGSize,
       &mut size as *mut _ as *mut _,
     );
-    if ok {
-      Some((size.width, size.height))
-    } else {
-      None
-    }
+    if ok { Some((size.width, size.height)) } else { None }
   }
 }
 
@@ -239,8 +228,7 @@ fn get_children_via_ffi(element: &AXUIElement, attr_name: &str) -> Vec<AXUIEleme
   }
 
   let ax_type_id = unsafe { AXUIElementGetTypeID() };
-  let arr_type_id =
-    unsafe { core_foundation::array::CFArray::<core_foundation::base::CFType>::type_id() };
+  let arr_type_id = unsafe { core_foundation::array::CFArray::<core_foundation::base::CFType>::type_id() };
 
   let value_type = unsafe { CFGetTypeID(value as *const _) };
 
@@ -259,8 +247,7 @@ fn get_children_via_ffi(element: &AXUIElement, attr_name: &str) -> Vec<AXUIEleme
   }
 
   // It's a CFArray — wrap with create rule (we own it).
-  let cf_array: CFArray<core_foundation::base::CFType> =
-    unsafe { TCFType::wrap_under_create_rule(value as *const _) };
+  let cf_array: CFArray<core_foundation::base::CFType> = unsafe { TCFType::wrap_under_create_rule(value as *const _) };
 
   let count = cf_array.len();
   if count == 0 {
@@ -316,7 +303,11 @@ pub fn dump_attributes(element: &AXUIElement) -> String {
         // Try to extract as string
         if val.instance_of::<core_foundation::string::CFString>() {
           let s: CFString = unsafe { TCFType::wrap_under_get_rule(val.as_CFTypeRef() as *const _) };
-          out.push_str(&format!("  \"{}\": \"{}\",\n", name, s.to_string().replace('"', "\\\"")));
+          out.push_str(&format!(
+            "  \"{}\": \"{}\",\n",
+            name,
+            s.to_string().replace('"', "\\\"")
+          ));
         }
         // Try to extract as number
         else if val.instance_of::<core_foundation::number::CFNumber>() {
@@ -342,12 +333,22 @@ pub fn dump_attributes(element: &AXUIElement) -> String {
         }
         // Try AXValue (point/size/rect)
         else {
-          use accessibility_sys::{AXValueGetValue, kAXValueTypeCGPoint, kAXValueTypeCGSize, kAXValueTypeCGRect};
+          use accessibility_sys::{AXValueGetValue, kAXValueTypeCGPoint, kAXValueTypeCGRect, kAXValueTypeCGSize};
           use core_graphics::geometry::{CGPoint, CGRect, CGSize};
 
-          let mut rect = CGRect { origin: CGPoint { x: 0.0, y: 0.0 }, size: CGSize { width: 0.0, height: 0.0 } };
+          let mut rect = CGRect {
+            origin: CGPoint { x: 0.0, y: 0.0 },
+            size: CGSize {
+              width: 0.0,
+              height: 0.0,
+            },
+          };
           let ok = unsafe {
-            AXValueGetValue(val.as_CFTypeRef() as *mut _, kAXValueTypeCGRect, &mut rect as *mut _ as *mut _)
+            AXValueGetValue(
+              val.as_CFTypeRef() as *mut _,
+              kAXValueTypeCGRect,
+              &mut rect as *mut _ as *mut _,
+            )
           };
           if ok {
             out.push_str(&format!(
@@ -358,15 +359,26 @@ pub fn dump_attributes(element: &AXUIElement) -> String {
             // Try point
             let mut point = CGPoint { x: 0.0, y: 0.0 };
             let ok = unsafe {
-              AXValueGetValue(val.as_CFTypeRef() as *mut _, kAXValueTypeCGPoint, &mut point as *mut _ as *mut _)
+              AXValueGetValue(
+                val.as_CFTypeRef() as *mut _,
+                kAXValueTypeCGPoint,
+                &mut point as *mut _ as *mut _,
+              )
             };
             if ok {
               out.push_str(&format!("  \"{}\": [{},{}],\n", name, point.x, point.y));
             } else {
               // Try size
-              let mut size = CGSize { width: 0.0, height: 0.0 };
+              let mut size = CGSize {
+                width: 0.0,
+                height: 0.0,
+              };
               let ok = unsafe {
-                AXValueGetValue(val.as_CFTypeRef() as *mut _, kAXValueTypeCGSize, &mut size as *mut _ as *mut _)
+                AXValueGetValue(
+                  val.as_CFTypeRef() as *mut _,
+                  kAXValueTypeCGSize,
+                  &mut size as *mut _ as *mut _,
+                )
               };
               if ok {
                 out.push_str(&format!("  \"{}\": [{},{}],\n", name, size.width, size.height));
@@ -440,8 +452,12 @@ impl Element for MacElement {
       })
       .unwrap_or_default();
     let mut parts: Vec<&str> = vec![];
-    if !desc.is_empty() { parts.push(&desc); }
-    if !help.is_empty() && help != desc { parts.push(&help); }
+    if !desc.is_empty() {
+      parts.push(&desc);
+    }
+    if !help.is_empty() && help != desc {
+      parts.push(&help);
+    }
     if !placeholder.is_empty() && placeholder != desc && placeholder != help {
       parts.push(&placeholder);
     }
@@ -546,10 +562,7 @@ impl Element for MacElement {
   }
 
   fn focus(&self) -> Result<()> {
-    self
-      .element
-      .raise()
-      .map_err(|e| anyhow::anyhow!("focus failed: {e:?}"))
+    self.element.raise().map_err(|e| anyhow::anyhow!("focus failed: {e:?}"))
   }
 
   /// Set AXFocused=true on this element to give it keyboard focus.
@@ -609,21 +622,15 @@ impl Element for MacElement {
 
         if let Ok(source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) {
           let point = core_graphics::geometry::CGPoint::new(center_x, center_y);
-          if let Ok(click_down) = CGEvent::new_mouse_event(
-            source.clone(),
-            CGEventType::LeftMouseDown,
-            point,
-            CGMouseButton::Left,
-          ) {
+          if let Ok(click_down) =
+            CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseDown, point, CGMouseButton::Left)
+          {
             click_down.post(CGEventTapLocation::HID);
             std::thread::sleep(std::time::Duration::from_millis(50));
 
-            if let Ok(click_up) = CGEvent::new_mouse_event(
-              source.clone(),
-              CGEventType::LeftMouseUp,
-              point,
-              CGMouseButton::Left,
-            ) {
+            if let Ok(click_up) =
+              CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseUp, point, CGMouseButton::Left)
+            {
               click_up.post(CGEventTapLocation::HID);
               return Ok(());
             }
@@ -754,9 +761,7 @@ fn find_elements_by_selector(root: &AXUIElement, xpath: &str) -> Vec<MacElement>
         let value = get_ax_value_as_string(&elem);
         let searchable = if title.is_empty() { value } else { title };
         let ct = role_to_control_type(&role);
-        let matches = target_role == "*"
-          || role == target_role
-          || ct.eq_ignore_ascii_case(&target_role);
+        let matches = target_role == "*" || role == target_role || ct.eq_ignore_ascii_case(&target_role);
         let name_ok = match &name_filter {
           Some(n) => searchable.to_lowercase().contains(&n.to_lowercase()),
           None => true,
@@ -855,9 +860,7 @@ fn find_all_matching(
     let searchable = if title.is_empty() { value } else { title };
 
     let control_type = role_to_control_type(&role);
-    let matches_role = target_role == "*"
-      || role == target_role
-      || control_type.eq_ignore_ascii_case(target_role);
+    let matches_role = target_role == "*" || role == target_role || control_type.eq_ignore_ascii_case(target_role);
     let matches_name = match name_filter {
       Some(n) => searchable.to_lowercase().contains(&n.to_lowercase()),
       None => true,
@@ -875,8 +878,7 @@ fn find_all_matching(
           .ok()
           .map(|s| s.to_string())
           .unwrap_or_default();
-        aid.to_lowercase().contains(&id.to_lowercase())
-          || role_desc.to_lowercase().contains(&id.to_lowercase())
+        aid.to_lowercase().contains(&id.to_lowercase()) || role_desc.to_lowercase().contains(&id.to_lowercase())
       }
       None => true,
     };
@@ -1010,8 +1012,7 @@ fn render_tree_node(
     return false;
   }
   let mac = MacElement::new(elem.clone());
-  let visible = query.include_hidden
-    || (mac.x() >= 0 && mac.y() >= 0 && mac.width() > 0 && mac.height() > 0);
+  let visible = query.include_hidden || (mac.x() >= 0 && mac.y() >= 0 && mac.width() > 0 && mac.height() > 0);
   let matches_self = visible && matches_filter(elem, query);
 
   // Build children output first so we know if any descendant matches.
@@ -1082,11 +1083,14 @@ fn matches_filter(elem: &AXUIElement, query: &ElementQuery) -> bool {
       .map(|s: core_foundation::string::CFString| s.to_string())
       .unwrap_or_default();
     // Multi-role: agent can pass `--role Button,Edit` to match either.
-    let wanted: Vec<&str> = r.split(|c| c == ',' || c == '|').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
-    let any_match = wanted.iter().any(|w| {
-      matches_query_role(&role, w)
-        || (!role_desc.is_empty() && matches_role_description(&role_desc, w))
-    });
+    let wanted: Vec<&str> = r
+      .split(|c| c == ',' || c == '|')
+      .map(|s| s.trim())
+      .filter(|s| !s.is_empty())
+      .collect();
+    let any_match = wanted
+      .iter()
+      .any(|w| matches_query_role(&role, w) || (!role_desc.is_empty() && matches_role_description(&role_desc, w)));
     if !any_match {
       return false;
     }
@@ -1162,14 +1166,8 @@ pub fn probe_at_position(x: i32, y: i32) -> Result<String> {
 
   let system_wide = AXUIElement::system_wide();
   let mut elem_ref: *mut accessibility_sys::__AXUIElement = std::ptr::null_mut();
-  let err = unsafe {
-    AXUIElementCopyElementAtPosition(
-      system_wide.as_concrete_TypeRef(),
-      x as f32,
-      y as f32,
-      &mut elem_ref,
-    )
-  };
+  let err =
+    unsafe { AXUIElementCopyElementAtPosition(system_wide.as_concrete_TypeRef(), x as f32, y as f32, &mut elem_ref) };
   if err != kAXErrorSuccess || elem_ref.is_null() {
     return Ok(format!("No element found at ({}, {}), AXError: {}", x, y, err));
   }
@@ -1253,8 +1251,7 @@ fn matches_query_role(ax_role: &str, query_role: &str) -> bool {
   let ax_roles = abstract_role_to_ax_roles(query_role);
   if ax_roles.is_empty() {
     // Unknown abstract role — fall back to direct or control-type match
-    return ax_role.eq_ignore_ascii_case(query_role)
-      || role_to_control_type(ax_role).eq_ignore_ascii_case(query_role);
+    return ax_role.eq_ignore_ascii_case(query_role) || role_to_control_type(ax_role).eq_ignore_ascii_case(query_role);
   }
   ax_roles.contains(&ax_role)
 }
@@ -1266,8 +1263,16 @@ fn matches_role_description(role_desc: &str, query_role: &str) -> bool {
   let candidates: &[&str] = match query_role {
     "Button" => &["button", "按钮", "ボタン", "버튼"],
     "Edit" | "TextField" | "TextBox" => &[
-      "text field", "search field", "text area", "textbox",
-      "文本栏", "搜索文本栏", "文本字段", "搜索字段", "输入框", "文本框",
+      "text field",
+      "search field",
+      "text area",
+      "textbox",
+      "文本栏",
+      "搜索文本栏",
+      "文本字段",
+      "搜索字段",
+      "输入框",
+      "文本框",
     ],
     "Text" | "Label" | "StaticText" => &["static text", "label", "文本", "标签"],
     "CheckBox" => &["check box", "checkbox", "复选框"],
@@ -1286,11 +1291,7 @@ fn matches_role_description(role_desc: &str, query_role: &str) -> bool {
 }
 
 /// BFS-traverse an AXUIElement tree, applying role + text filters from ElementQuery.
-fn bfs_query(
-  root: &AXUIElement,
-  query: &ElementQuery,
-  max_depth: usize,
-) -> Vec<MacElement> {
+fn bfs_query(root: &AXUIElement, query: &ElementQuery, max_depth: usize) -> Vec<MacElement> {
   bfs_query_with_extra(root, query, max_depth, &[])
 }
 
@@ -1310,15 +1311,13 @@ fn bfs_query_with_extra(
   let mut visited: std::collections::HashSet<usize> = std::collections::HashSet::new();
   let mut queue: VecDeque<(AXUIElement, usize)> = VecDeque::new();
 
-  let mut push = |q: &mut VecDeque<(AXUIElement, usize)>,
-                  v: &mut std::collections::HashSet<usize>,
-                  e: AXUIElement,
-                  d: usize| {
-    let key = ax_identity_key(&e);
-    if v.insert(key) {
-      q.push_back((e, d));
-    }
-  };
+  let mut push =
+    |q: &mut VecDeque<(AXUIElement, usize)>, v: &mut std::collections::HashSet<usize>, e: AXUIElement, d: usize| {
+      let key = ax_identity_key(&e);
+      if v.insert(key) {
+        q.push_back((e, d));
+      }
+    };
 
   push(&mut queue, &mut visited, root.clone(), 0);
   for e in extra_roots {
@@ -1334,16 +1333,19 @@ fn bfs_query_with_extra(
 
     let role_ok = match &query.role {
       Some(r) => {
-        let wanted: Vec<&str> = r.split(|c| c == ',' || c == '|').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+        let wanted: Vec<&str> = r
+          .split(|c| c == ',' || c == '|')
+          .map(|s| s.trim())
+          .filter(|s| !s.is_empty())
+          .collect();
         let role_desc: String = elem
           .attribute(&AXAttribute::role_description())
           .ok()
           .map(|s: core_foundation::string::CFString| s.to_string())
           .unwrap_or_default();
-        wanted.iter().any(|w| {
-          matches_query_role(&role, w)
-            || (!role_desc.is_empty() && matches_role_description(&role_desc, w))
-        })
+        wanted
+          .iter()
+          .any(|w| matches_query_role(&role, w) || (!role_desc.is_empty() && matches_role_description(&role_desc, w)))
       }
       None => true,
     };
@@ -1424,9 +1426,7 @@ fn hit_test_at(x: f32, y: f32) -> Option<AXUIElement> {
   use accessibility_sys::{AXUIElementCopyElementAtPosition, kAXErrorSuccess};
   let sys = AXUIElement::system_wide();
   let mut out: *mut accessibility_sys::__AXUIElement = std::ptr::null_mut();
-  let err = unsafe {
-    AXUIElementCopyElementAtPosition(sys.as_concrete_TypeRef(), x, y, &mut out)
-  };
+  let err = unsafe { AXUIElementCopyElementAtPosition(sys.as_concrete_TypeRef(), x, y, &mut out) };
   if err != kAXErrorSuccess || out.is_null() {
     return None;
   }
@@ -1438,10 +1438,7 @@ fn hit_test_at(x: f32, y: f32) -> Option<AXUIElement> {
 /// Walk up from `elem` and return the highest ancestor that is NOT in `reachable`.
 /// If `elem` itself is reachable, returns None. Otherwise returns the deepest unreachable
 /// ancestor (its parent IS reachable, or it has no parent / is a window/app).
-fn walk_up_until_reachable(
-  elem: AXUIElement,
-  reachable: &std::collections::HashSet<usize>,
-) -> Option<AXUIElement> {
+fn walk_up_until_reachable(elem: AXUIElement, reachable: &std::collections::HashSet<usize>) -> Option<AXUIElement> {
   if reachable.contains(&ax_identity_key(&elem)) {
     return None;
   }
@@ -1497,11 +1494,7 @@ fn walk_up_to_root(elem: AXUIElement, app_root_key: usize) -> AXUIElement {
 /// Scan the window rect with hit-tests on a coarse grid (default 48px) to discover
 /// AX roots that are NOT reachable from the main window's AXChildren tree.
 /// Returns deduplicated additional roots (walked up just below the AXWindow/AXApplication).
-fn discover_hidden_roots(
-  app_root: &AXUIElement,
-  window_rect: (f64, f64, f64, f64),
-  step: i32,
-) -> Vec<AXUIElement> {
+fn discover_hidden_roots(app_root: &AXUIElement, window_rect: (f64, f64, f64, f64), step: i32) -> Vec<AXUIElement> {
   let (wx, wy, ww, wh) = window_rect;
   let app_key = ax_identity_key(app_root);
 
@@ -1568,12 +1561,23 @@ fn ax_screen_rect(elem: &AXUIElement) -> Option<(f64, f64, f64, f64)> {
   let pos_v = elem.attribute(&AXAttribute::new(&cfstr("AXPosition"))).ok()?;
   let sz_v = elem.attribute(&AXAttribute::new(&cfstr("AXSize"))).ok()?;
   let mut p = CGPoint { x: 0.0, y: 0.0 };
-  let mut s = CGSize { width: 0.0, height: 0.0 };
+  let mut s = CGSize {
+    width: 0.0,
+    height: 0.0,
+  };
   let ok_p = unsafe {
-    AXValueGetValue(pos_v.as_CFTypeRef() as *mut _, kAXValueTypeCGPoint, &mut p as *mut _ as *mut _)
+    AXValueGetValue(
+      pos_v.as_CFTypeRef() as *mut _,
+      kAXValueTypeCGPoint,
+      &mut p as *mut _ as *mut _,
+    )
   };
   let ok_s = unsafe {
-    AXValueGetValue(sz_v.as_CFTypeRef() as *mut _, kAXValueTypeCGSize, &mut s as *mut _ as *mut _)
+    AXValueGetValue(
+      sz_v.as_CFTypeRef() as *mut _,
+      kAXValueTypeCGSize,
+      &mut s as *mut _ as *mut _,
+    )
   };
   if !ok_p || !ok_s || s.width <= 0.0 || s.height <= 0.0 {
     return None;
@@ -1591,9 +1595,7 @@ fn scope_to_root(scope: &ElementScope) -> Result<AXUIElement> {
       use objc2_app_kit::NSWorkspace;
       let ws = unsafe { NSWorkspace::sharedWorkspace() };
       let front = unsafe { ws.frontmostApplication() };
-      let pid = front
-        .map(|app| unsafe { app.processIdentifier() })
-        .unwrap_or(0);
+      let pid = front.map(|app| unsafe { app.processIdentifier() }).unwrap_or(0);
       if pid == 0 {
         Ok(AXUIElement::system_wide())
       } else {
@@ -1606,10 +1608,7 @@ fn scope_to_root(scope: &ElementScope) -> Result<AXUIElement> {
 /// Returns (root, extra_roots) — extra_roots are AX subtrees discovered via hit-test
 /// grid scan inside the scope's window bounds (catches QQ Music-style floating panels
 /// that aren't in the window's AXChildren).
-fn scope_to_roots(
-  scope: &ElementScope,
-  no_hit_test: bool,
-) -> Result<(AXUIElement, Vec<AXUIElement>)> {
+fn scope_to_roots(scope: &ElementScope, no_hit_test: bool) -> Result<(AXUIElement, Vec<AXUIElement>)> {
   let root = scope_to_root(scope)?;
   if no_hit_test {
     return Ok((root, Vec::new()));
@@ -1622,12 +1621,11 @@ fn scope_to_roots(
         .find(|w| w.hwnd == handle.0)
         .map(|w| (w.x as f64, w.y as f64, w.width as f64, w.height as f64))
     }
-    ElementScope::Application(_) | ElementScope::Foreground => ax_screen_rect(&root)
-      .or_else(|| {
-        // Fall back to the focused window's rect.
-        let focused: AXUIElement = root.attribute(&AXAttribute::focused_window()).ok()?;
-        ax_screen_rect(&focused)
-      }),
+    ElementScope::Application(_) | ElementScope::Foreground => ax_screen_rect(&root).or_else(|| {
+      // Fall back to the focused window's rect.
+      let focused: AXUIElement = root.attribute(&AXAttribute::focused_window()).ok()?;
+      ax_screen_rect(&focused)
+    }),
   };
   let extras = match rect {
     Some(r) if r.2 > 100.0 && r.3 > 100.0 => discover_hidden_roots(&root, r, 48),
@@ -1637,10 +1635,7 @@ fn scope_to_roots(
 }
 
 /// Public query_elements: BFS search scoped to a window (or desktop).
-pub fn query_elements(
-  scope: &ElementScope,
-  query: &ElementQuery,
-) -> Result<Vec<Box<dyn Element>>> {
+pub fn query_elements(scope: &ElementScope, query: &ElementQuery) -> Result<Vec<Box<dyn Element>>> {
   ensure_ax_trusted()?;
   let (root, extras) = scope_to_roots(scope, query.no_hit_test)?;
   let max_depth = query.max_depth.unwrap_or(usize::MAX);
@@ -1652,10 +1647,7 @@ pub fn query_elements(
 }
 
 /// Public query_one: like query_elements but enforces uniqueness.
-pub fn query_one(
-  scope: &ElementScope,
-  query: &ElementQuery,
-) -> Result<Box<dyn Element>> {
+pub fn query_one(scope: &ElementScope, query: &ElementQuery) -> Result<Box<dyn Element>> {
   ensure_ax_trusted()?;
   let (root, extras) = scope_to_roots(scope, query.no_hit_test)?;
   let max_depth = query.max_depth.unwrap_or(usize::MAX);
@@ -1665,9 +1657,9 @@ pub fn query_one(
   }
 
   match results.len() {
-    0 => Err(anyhow::anyhow!(crate::error::PlatformError::ElementNotFound(
-      format!("{query:?}")
-    ))),
+    0 => Err(anyhow::anyhow!(crate::error::PlatformError::ElementNotFound(format!(
+      "{query:?}"
+    )))),
     1 => Ok(Box::new(results.remove(0))),
     n => {
       if let Some(idx) = query.index {
@@ -1677,19 +1669,14 @@ pub fn query_one(
           .map(|e| Box::new(e) as Box<dyn Element>)
           .ok_or_else(|| anyhow::anyhow!("element index {idx} out of range (found {n})"))
       } else {
-        Err(anyhow::anyhow!(
-          crate::error::PlatformError::AmbiguousMatch(n)
-        ))
+        Err(anyhow::anyhow!(crate::error::PlatformError::AmbiguousMatch(n)))
       }
     }
   }
 }
 
 /// Public find_by_xpath: delegates to find_elements_by_selector (BUG-04 already fixed there).
-pub fn find_by_xpath(
-  scope: &ElementScope,
-  xpath: &str,
-) -> Result<Vec<Box<dyn Element>>> {
+pub fn find_by_xpath(scope: &ElementScope, xpath: &str) -> Result<Vec<Box<dyn Element>>> {
   ensure_ax_trusted()?;
   let root = scope_to_root(scope)?;
   let results = find_elements_by_selector(&root, xpath);

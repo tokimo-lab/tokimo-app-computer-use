@@ -9,10 +9,7 @@ pub enum MouseAction {
   /// Get current cursor position
   Pos,
   /// Move cursor to absolute screen coordinates
-  Move {
-    x: i32,
-    y: i32,
-  },
+  Move { x: i32, y: i32 },
   /// Click at screen coordinates
   Click {
     x: f64,
@@ -58,7 +55,13 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: MouseAction) -> Result<()
       executor.call("mouse.move", json!({"x": x, "y": y}))?;
       println!("ok");
     }
-    MouseAction::Click { x, y, sel, button, double } => {
+    MouseAction::Click {
+      x,
+      y,
+      sel,
+      button,
+      double,
+    } => {
       let mut params = sel.to_json_scope();
       params["x"] = json!(x);
       params["y"] = json!(y);
@@ -67,7 +70,14 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: MouseAction) -> Result<()
       let r = executor.call("mouse.click", params)?;
       print_input_result(&r);
     }
-    MouseAction::Drag { x1, y1, x2, y2, sel, button } => {
+    MouseAction::Drag {
+      x1,
+      y1,
+      x2,
+      y2,
+      sel,
+      button,
+    } => {
       let mut params = sel.to_json_scope();
       params["x1"] = json!(x1);
       params["y1"] = json!(y1);

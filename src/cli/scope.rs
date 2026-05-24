@@ -1,5 +1,5 @@
 use clap::Args;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[derive(Args, Debug, Default, Clone)]
 pub(crate) struct WindowSel {

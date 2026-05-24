@@ -80,9 +80,7 @@ fn get_proc_path(pid: u32) -> String {
     let mut buf = [0i8; 1024];
     let len = proc_pidpath(pid as i32, buf.as_mut_ptr(), buf.len() as u32);
     if len > 0 {
-      CStr::from_ptr(buf.as_ptr())
-        .to_string_lossy()
-        .into_owned()
+      CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned()
     } else {
       String::new()
     }
@@ -95,9 +93,7 @@ fn get_proc_name(pid: u32) -> String {
     let mut buf = [0i8; 1024];
     let len = proc_name(pid as i32, buf.as_mut_ptr(), buf.len() as u32);
     if len > 0 {
-      CStr::from_ptr(buf.as_ptr())
-        .to_string_lossy()
-        .into_owned()
+      CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned()
     } else {
       String::new()
     }
@@ -174,9 +170,7 @@ pub fn get_process_ids_by_name(name: &str) -> Result<Vec<u32>> {
     } else {
       extract_name(&path)
     };
-    if proc_name.to_lowercase().contains(&name_lower)
-      || path.to_lowercase().contains(&name_lower)
-    {
+    if proc_name.to_lowercase().contains(&name_lower) || path.to_lowercase().contains(&name_lower) {
       result.push(pid);
     }
   }
@@ -186,13 +180,15 @@ pub fn get_process_ids_by_name(name: &str) -> Result<Vec<u32>> {
 pub fn launch_app(path: &str, wait_timeout_ms: u32) -> Result<u32> {
   // Collect PIDs before launch
   let target_name = extract_name(path);
-  let before_pids: std::collections::HashSet<u32> =
-    get_process_ids_by_name(&target_name)?.into_iter().collect();
+  let before_pids: std::collections::HashSet<u32> = get_process_ids_by_name(&target_name)?.into_iter().collect();
 
   // Use NSWorkspace to open the application
   let launched: anyhow::Result<()> = launch_via_ns_workspace(path).or_else(|_| {
     // Fallback: direct exec
-    std::process::Command::new(path).spawn().map(|_| ()).map_err(|e| e.into())
+    std::process::Command::new(path)
+      .spawn()
+      .map(|_| ())
+      .map_err(|e| e.into())
   });
 
   if let Err(e) = launched {
@@ -238,8 +234,7 @@ fn launch_via_ns_workspace(path: &str) -> Result<()> {
 
     // Create NSURL from path string
     let ns_url_cls = objc2::class!(NSURL);
-    let url: *mut objc2::runtime::AnyObject =
-      objc2::msg_send![ns_url_cls, fileURLWithPath: ns_path];
+    let url: *mut objc2::runtime::AnyObject = objc2::msg_send![ns_url_cls, fileURLWithPath: ns_path];
     if url.is_null() {
       return Err(anyhow::anyhow!("fileURLWithPath returned null"));
     }
@@ -280,9 +275,7 @@ pub fn launch_app_async(path_or_bundle: &str, wait: bool) -> Result<u32> {
     }
   };
 
-  let cfg = unsafe {
-    NSWorkspaceOpenConfiguration::init(NSWorkspaceOpenConfiguration::alloc())
-  };
+  let cfg = unsafe { NSWorkspaceOpenConfiguration::init(NSWorkspaceOpenConfiguration::alloc()) };
 
   let block = RcBlock::new(move |app: *mut NSRunningApplication, err: *mut NSError| {
     if !err.is_null() && app.is_null() {
@@ -301,7 +294,11 @@ pub fn launch_app_async(path_or_bundle: &str, wait: bool) -> Result<u32> {
     ws.openApplicationAtURL_configuration_completionHandler(&url, &cfg, Some(&block));
   }
 
-  let timeout = if wait { Duration::from_secs(20) } else { Duration::from_secs(5) };
+  let timeout = if wait {
+    Duration::from_secs(20)
+  } else {
+    Duration::from_secs(5)
+  };
   match rx.recv_timeout(timeout) {
     Ok(Ok(pid)) => Ok(pid),
     Ok(Err(e)) => Err(e),
@@ -311,8 +308,7 @@ pub fn launch_app_async(path_or_bundle: &str, wait: bool) -> Result<u32> {
 
 pub fn terminate_app(pid: u32) -> Result<bool> {
   unsafe {
-    let cls =
-      objc2::class!(NSRunningApplication);
+    let cls = objc2::class!(NSRunningApplication);
     let app: *mut objc2::runtime::AnyObject =
       objc2::msg_send![cls, runningApplicationWithProcessIdentifier: pid as i32];
     if app.is_null() {
@@ -386,7 +382,10 @@ pub fn resolve_app_pid(name: &str) -> Result<Option<u32>> {
       }
       // Prefer apps that actually own at least one CGWindow (filters out launchers
       // and helpers that match by name but have no UI).
-      if super::window::get_windows_by_process_id(pid).map(|w| !w.is_empty()).unwrap_or(false) {
+      if super::window::get_windows_by_process_id(pid)
+        .map(|w| !w.is_empty())
+        .unwrap_or(false)
+      {
         score += 300;
       }
       scored.push((score, pid, localized));

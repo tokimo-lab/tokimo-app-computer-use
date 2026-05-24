@@ -23,26 +23,16 @@ pub enum WindowAction {
     pid: Option<u32>,
   },
   /// Show details of a specific window
-  Info {
-    handle: i64,
-  },
+  Info { handle: i64 },
   /// Bring a window to the foreground
   Focus {
     #[command(flatten)]
     sel: WindowSel,
   },
   /// Move a window to a screen position
-  Move {
-    handle: i64,
-    x: i32,
-    y: i32,
-  },
+  Move { handle: i64, x: i32, y: i32 },
   /// Resize a window
-  Resize {
-    handle: i64,
-    w: i32,
-    h: i32,
-  },
+  Resize { handle: i64, w: i32, h: i32 },
   /// Move and resize a window in one call
   Rect {
     handle: i64,
@@ -52,10 +42,7 @@ pub enum WindowAction {
     h: i32,
   },
   /// Change window state (minimize / maximize / restore)
-  State {
-    handle: i64,
-    op: String,
-  },
+  State { handle: i64, op: String },
   /// Show the currently focused window
   Foreground,
 }

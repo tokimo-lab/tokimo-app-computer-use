@@ -1,5 +1,4 @@
 mod audio;
-mod scope;
 mod battery;
 mod bluetooth;
 mod element;
@@ -9,6 +8,7 @@ mod mouse;
 mod printer;
 mod process;
 mod registry;
+mod scope;
 mod screenshot;
 mod service;
 mod software;

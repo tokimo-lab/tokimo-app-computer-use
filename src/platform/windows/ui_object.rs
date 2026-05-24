@@ -322,7 +322,36 @@ impl Element for WindowsElement {
     self.is_focused_val()
   }
   fn confirm(&self) -> Result<()> {
-    Err(anyhow::anyhow!("confirm not implemented on Windows"))
+    use windows::Win32::UI::Accessibility::*;
+    unsafe {
+      if let Ok(p) = self
+        .element
+        .GetCurrentPatternAs::<IUIAutomationInvokePattern>(UIA_InvokePatternId)
+      {
+        return p.Invoke().map_err(|e| anyhow::anyhow!("Invoke failed: {e}"));
+      }
+      if let Ok(p) = self
+        .element
+        .GetCurrentPatternAs::<IUIAutomationTogglePattern>(UIA_TogglePatternId)
+      {
+        return p.Toggle().map_err(|e| anyhow::anyhow!("Toggle failed: {e}"));
+      }
+      if let Ok(p) = self
+        .element
+        .GetCurrentPatternAs::<IUIAutomationSelectionItemPattern>(UIA_SelectionItemPatternId)
+      {
+        return p.Select().map_err(|e| anyhow::anyhow!("Select failed: {e}"));
+      }
+      if let Ok(p) = self
+        .element
+        .GetCurrentPatternAs::<IUIAutomationExpandCollapsePattern>(UIA_ExpandCollapsePatternId)
+      {
+        return p.Expand().map_err(|e| anyhow::anyhow!("Expand failed: {e}"));
+      }
+    }
+    // Fallback: focus + Enter
+    let _ = self.focus_element();
+    keyboard::send_keys(vec![crate::types::KeyCode::Return], None)
   }
   fn to_xml(&self, indent: usize) -> String {
     self.to_xml_string(indent)

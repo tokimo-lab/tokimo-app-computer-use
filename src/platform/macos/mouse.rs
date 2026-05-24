@@ -86,8 +86,7 @@ pub fn move_cursor(x: i32, y: i32) -> Result<()> {
 
 pub fn get_cursor_position() -> Result<(i32, i32)> {
   let source = create_source()?;
-  let event = CGEvent::new(source)
-    .map_err(|_| anyhow::anyhow!("failed to create event for cursor position"))?;
+  let event = CGEvent::new(source).map_err(|_| anyhow::anyhow!("failed to create event for cursor position"))?;
   let pt = event.location();
   Ok((pt.x as i32, from_cg_y(pt.y) as i32))
 }
@@ -104,7 +103,14 @@ fn screen_to_abs(handle: &WindowHandle, x: f64, y: f64) -> Result<(i32, i32)> {
   }
 }
 
-fn do_click(source: &CGEventSource, point: CGPoint, cg_button: CGMouseButton, down_type: CGEventType, up_type: CGEventType, click_state: i64) -> Result<()> {
+fn do_click(
+  source: &CGEventSource,
+  point: CGPoint,
+  cg_button: CGMouseButton,
+  down_type: CGEventType,
+  up_type: CGEventType,
+  click_state: i64,
+) -> Result<()> {
   let down_event = CGEvent::new_mouse_event(source.clone(), down_type, point, cg_button)
     .map_err(|_| anyhow::anyhow!("failed to create mouse down event"))?;
   down_event.set_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE, click_state);
@@ -116,13 +122,7 @@ fn do_click(source: &CGEventSource, point: CGPoint, cg_button: CGMouseButton, do
   post_event(&up_event)
 }
 
-pub fn click(
-  handle: &WindowHandle,
-  x: f64,
-  y: f64,
-  button: MouseButton,
-  double_click: bool,
-) -> Result<InputResult> {
+pub fn click(handle: &WindowHandle, x: f64, y: f64, button: MouseButton, double_click: bool) -> Result<InputResult> {
   let (abs_x, abs_y) = screen_to_abs(handle, x, y)?;
   let source = create_source()?;
   let point = CGPoint::new(abs_x as f64, to_cg_y(abs_y as f64));
@@ -195,10 +195,7 @@ pub fn drag(
   let steps = 10;
   for i in 1..=steps {
     let t = i as f64 / steps as f64;
-    let pt = CGPoint::new(
-      start.x + (end.x - start.x) * t,
-      start.y + (end.y - start.y) * t,
-    );
+    let pt = CGPoint::new(start.x + (end.x - start.x) * t, start.y + (end.y - start.y) * t);
     let mv = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseDragged, pt, CGMouseButton::Left)
       .map_err(|_| anyhow::anyhow!("failed to create drag move event"))?;
     post_event(&mv)?;
@@ -213,13 +210,7 @@ pub fn drag(
   Ok(InputResult::success(to_x as i32, to_y as i32, to_x as i32, to_y as i32))
 }
 
-pub fn scroll(
-  _handle: &WindowHandle,
-  x: f64,
-  y: f64,
-  delta_x: i32,
-  delta_y: i32,
-) -> Result<InputResult> {
+pub fn scroll(_handle: &WindowHandle, x: f64, y: f64, delta_x: i32, delta_y: i32) -> Result<InputResult> {
   let source = create_source()?;
 
   // BUG-07: Move cursor to target position before scrolling

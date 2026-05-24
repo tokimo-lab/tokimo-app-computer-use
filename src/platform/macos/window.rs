@@ -64,9 +64,7 @@ fn read_window_list(visible_only: bool) -> Result<Vec<WindowInfo>> {
         if visible_only && !is_on_screen {
           continue;
         }
-        let title = unsafe { w.title() }
-          .map(|s| s.to_string())
-          .unwrap_or_default();
+        let title = unsafe { w.title() }.map(|s| s.to_string()).unwrap_or_default();
         let frame = unsafe { w.frame() };
         let (app_name, pid) = unsafe { w.owningApplication() }
           .map(|app| {
@@ -107,9 +105,9 @@ fn read_window_list(visible_only: bool) -> Result<Vec<WindowInfo>> {
   // BUG-03: Add 5s timeout to prevent permanent block if Screen Recording denied
   match rx.recv_timeout(std::time::Duration::from_secs(5)) {
     Ok(windows) => Ok(windows),
-    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-      Err(anyhow::anyhow!(crate::error::PlatformError::ScreenRecordingPermissionDenied))
-    }
+    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(anyhow::anyhow!(
+      crate::error::PlatformError::ScreenRecordingPermissionDenied
+    )),
     Err(e) => Err(anyhow::anyhow!("shareable content channel error: {e}")),
   }
 }
@@ -130,8 +128,7 @@ pub fn find_windows_by_title(pattern: &str, process_name: Option<&str>) -> Resul
       .filter(|w| {
         // BUG-16: title-only match (no process name fallback)
         let title_match = w.title.to_lowercase().contains(&pat);
-        let proc_filter =
-          process_name.is_none_or(|p| w.process_name.to_lowercase().contains(&p.to_lowercase()));
+        let proc_filter = process_name.is_none_or(|p| w.process_name.to_lowercase().contains(&p.to_lowercase()));
         title_match && proc_filter
       })
       .collect(),
@@ -188,8 +185,7 @@ pub fn get_foreground_window() -> Result<WindowHandle> {
 /// Get the frontmost application PID via NSWorkspace.
 fn get_frontmost_pid() -> Result<u32> {
   let ws = unsafe { objc2_app_kit::NSWorkspace::sharedWorkspace() };
-  let front = unsafe { ws.frontmostApplication() }
-    .ok_or_else(|| anyhow::anyhow!("frontmostApplication is null"))?;
+  let front = unsafe { ws.frontmostApplication() }.ok_or_else(|| anyhow::anyhow!("frontmostApplication is null"))?;
   Ok(unsafe { front.processIdentifier() } as u32)
 }
 
@@ -228,10 +224,8 @@ pub fn focus_app_by_pid(pid: u32) -> Result<()> {
   if let Some(first) = wins.first() {
     let action_str = cfstr("AXRaise");
     unsafe {
-      let _ = accessibility_sys::AXUIElementPerformAction(
-        first.as_concrete_TypeRef(),
-        action_str.as_concrete_TypeRef(),
-      );
+      let _ =
+        accessibility_sys::AXUIElementPerformAction(first.as_concrete_TypeRef(), action_str.as_concrete_TypeRef());
     }
     // Also mark as main/focused
     let _ = first.set_attribute(&AXAttribute::main(), true);
@@ -273,8 +267,7 @@ fn get_ax_windows(app: &accessibility::AXUIElement) -> Vec<accessibility::AXUIEl
   let Ok(windows_val) = app.attribute(&AXAttribute::new(&cfstr("AXWindows"))) else {
     return Vec::new();
   };
-  let arr: CFArray<CFType> =
-    unsafe { TCFType::wrap_under_get_rule(windows_val.as_CFTypeRef() as *const _) };
+  let arr: CFArray<CFType> = unsafe { TCFType::wrap_under_get_rule(windows_val.as_CFTypeRef() as *const _) };
   let ax_type_id = unsafe { accessibility_sys::AXUIElementGetTypeID() };
   let mut result = Vec::new();
   for i in 0..arr.len() {
@@ -347,10 +340,8 @@ pub fn focus_window(handle: &WindowHandle) -> Result<()> {
   if let Ok(ax_win) = ax_win {
     let action_str = cfstr("AXRaise");
     unsafe {
-      let _ = accessibility_sys::AXUIElementPerformAction(
-        ax_win.as_concrete_TypeRef(),
-        action_str.as_concrete_TypeRef(),
-      );
+      let _ =
+        accessibility_sys::AXUIElementPerformAction(ax_win.as_concrete_TypeRef(), action_str.as_concrete_TypeRef());
     }
   }
   activate_app(win.process_id)
@@ -363,12 +354,13 @@ pub fn move_window(handle: &WindowHandle, x: i32, y: i32) -> Result<()> {
     .find(|w| w.hwnd == handle.0)
     .ok_or_else(|| anyhow::anyhow!("window not found: {}", handle.0))?;
 
-  let point = core_graphics::geometry::CGPoint { x: x as f64, y: y as f64 };
+  let point = core_graphics::geometry::CGPoint {
+    x: x as f64,
+    y: y as f64,
+  };
   unsafe {
-    let ax_value = accessibility_sys::AXValueCreate(
-      accessibility_sys::kAXValueTypeCGPoint,
-      &point as *const _ as *const _,
-    );
+    let ax_value =
+      accessibility_sys::AXValueCreate(accessibility_sys::kAXValueTypeCGPoint, &point as *const _ as *const _);
     if ax_value.is_null() {
       return Err(anyhow::anyhow!("AXValueCreate failed for position"));
     }
@@ -385,12 +377,13 @@ pub fn resize_window(handle: &WindowHandle, width: i32, height: i32) -> Result<(
     .find(|w| w.hwnd == handle.0)
     .ok_or_else(|| anyhow::anyhow!("window not found: {}", handle.0))?;
 
-  let size = core_graphics::geometry::CGSize { width: width as f64, height: height as f64 };
+  let size = core_graphics::geometry::CGSize {
+    width: width as f64,
+    height: height as f64,
+  };
   unsafe {
-    let ax_value = accessibility_sys::AXValueCreate(
-      accessibility_sys::kAXValueTypeCGSize,
-      &size as *const _ as *const _,
-    );
+    let ax_value =
+      accessibility_sys::AXValueCreate(accessibility_sys::kAXValueTypeCGSize, &size as *const _ as *const _);
     if ax_value.is_null() {
       return Err(anyhow::anyhow!("AXValueCreate failed for size"));
     }

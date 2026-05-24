@@ -78,7 +78,11 @@ impl KeyboardControl for MacPlatform {
       ElementScope::Window(h) => h.clone(),
       ElementScope::Application(pid) => {
         let wins = window::get_windows_by_process_id(*pid)?;
-        wins.into_iter().next().map(|w| WindowHandle(w.hwnd)).ok_or_else(|| anyhow::anyhow!("no windows for pid {pid}"))?
+        wins
+          .into_iter()
+          .next()
+          .map(|w| WindowHandle(w.hwnd))
+          .ok_or_else(|| anyhow::anyhow!("no windows for pid {pid}"))?
       }
       ElementScope::Foreground => window::get_foreground_window()?,
     };

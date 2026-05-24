@@ -196,7 +196,16 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: ElementAction) -> Result<
       let r = executor.call("element.probe", json!({"x": x, "y": y}))?;
       println!("{}", r.as_str().unwrap_or(""));
     }
-    ElementAction::Click { sel, role, text, exact, nth, button, double, no_hit_test } => {
+    ElementAction::Click {
+      sel,
+      role,
+      text,
+      exact,
+      nth,
+      button,
+      double,
+      no_hit_test,
+    } => {
       let mut params = sel.to_json_scope();
       add_query_params(&mut params, role, text, exact, None, false, no_hit_test);
       params["index"] = json!(nth);
@@ -205,7 +214,17 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: ElementAction) -> Result<
       let r = executor.call("element.click", params)?;
       print_input_result(&r);
     }
-    ElementAction::Type { value, sel, role, text, exact, nth, enter, clear, no_hit_test } => {
+    ElementAction::Type {
+      value,
+      sel,
+      role,
+      text,
+      exact,
+      nth,
+      enter,
+      clear,
+      no_hit_test,
+    } => {
       let mut params = sel.to_json_scope();
       params["value"] = json!(value);
       add_query_params(&mut params, Some(role), text, exact, None, false, no_hit_test);
@@ -215,7 +234,14 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: ElementAction) -> Result<
       let r = executor.call("element.type", params)?;
       print_input_result(&r);
     }
-    ElementAction::Press { sel, role, text, exact, nth, no_hit_test } => {
+    ElementAction::Press {
+      sel,
+      role,
+      text,
+      exact,
+      nth,
+      no_hit_test,
+    } => {
       let mut params = sel.to_json_scope();
       add_query_params(&mut params, role, text, exact, None, false, no_hit_test);
       params["index"] = json!(nth);
@@ -254,7 +280,11 @@ fn print_elements_limited(value: &serde_json::Value, max: usize) {
       let y = e["y"].as_f64().unwrap_or(0.0) as i64;
       let w = e["width"].as_f64().unwrap_or(0.0) as i64;
       let h = e["height"].as_f64().unwrap_or(0.0) as i64;
-      let display_name = if name.is_empty() && !text.is_empty() { text } else { name };
+      let display_name = if name.is_empty() && !text.is_empty() {
+        text
+      } else {
+        name
+      };
       t.row(vec![
         ctrl.to_string(),
         display_name.to_string(),
@@ -270,7 +300,10 @@ fn print_elements_limited(value: &serde_json::Value, max: usize) {
     }
     t.print();
     if max > 0 && arr.len() > max {
-      println!("... ({} more elements not shown; raise --max to see them)", arr.len() - max);
+      println!(
+        "... ({} more elements not shown; raise --max to see them)",
+        arr.len() - max
+      );
     }
   }
 }

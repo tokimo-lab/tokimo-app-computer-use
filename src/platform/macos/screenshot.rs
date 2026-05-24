@@ -56,18 +56,18 @@ fn cg_image_to_png(image: &CGImage) -> Result<Vec<u8>> {
       if px + 3 < raw.len() {
         rgba.push(raw[px + 2]); // R
         rgba.push(raw[px + 1]); // G
-        rgba.push(raw[px]);     // B
+        rgba.push(raw[px]); // B
         rgba.push(raw[px + 3]); // A
       }
     }
   }
 
   use image::{ImageBuffer, Rgba};
-  let buf: ImageBuffer<Rgba<u8>, Vec<u8>> =
-    ImageBuffer::from_raw(width as u32, height as u32, rgba)
-      .ok_or_else(|| anyhow::anyhow!("failed to create image buffer"))?;
+  let buf: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_raw(width as u32, height as u32, rgba)
+    .ok_or_else(|| anyhow::anyhow!("failed to create image buffer"))?;
   let mut out = Vec::new();
-  buf.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+  buf
+    .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
     .map_err(|e| anyhow::anyhow!("PNG encoding failed: {e}"))?;
   Ok(out)
 }
@@ -100,9 +100,7 @@ fn get_shareable_content() -> Result<objc2::rc::Retained<SCShareableContent>> {
 
 fn capture_display(display: &SCDisplay) -> Result<CGImage> {
   let empty = objc2_foundation::NSArray::array();
-  let filter = unsafe {
-    SCContentFilter::initWithDisplay_excludingWindows(SCContentFilter::alloc(), display, &empty)
-  };
+  let filter = unsafe { SCContentFilter::initWithDisplay_excludingWindows(SCContentFilter::alloc(), display, &empty) };
   let config = unsafe { SCStreamConfiguration::init(SCStreamConfiguration::alloc()) };
 
   let (tx, rx) = mpsc::channel();
@@ -121,9 +119,7 @@ fn capture_display(display: &SCDisplay) -> Result<CGImage> {
   });
 
   unsafe {
-    SCScreenshotManager::captureImageWithFilter_configuration_completionHandler(
-      &filter, &config, Some(&block),
-    );
+    SCScreenshotManager::captureImageWithFilter_configuration_completionHandler(&filter, &config, Some(&block));
   }
 
   match rx.recv_timeout(TIMEOUT) {
@@ -150,8 +146,7 @@ pub fn take_desktop_screenshot(config: Option<&ScreenshotConfig>) -> Result<Vec<
         &core_graphics::geometry::CGPoint::new(l as f64, t as f64),
         &core_graphics::geometry::CGSize::new((r - l) as f64, (b - t) as f64),
       );
-      let cropped = cg_image.cropped(rect)
-        .ok_or_else(|| anyhow::anyhow!("crop failed"))?;
+      let cropped = cg_image.cropped(rect).ok_or_else(|| anyhow::anyhow!("crop failed"))?;
       return cg_image_to_png(&cropped);
     }
   }
@@ -168,9 +163,7 @@ pub fn take_window_screenshot(handle: &WindowHandle) -> Result<Vec<u8>> {
     .find(|w| unsafe { w.windowID() } == handle.0 as u32)
     .ok_or_else(|| anyhow::anyhow!("window {} not found in shareable content", handle.0))?;
 
-  let filter = unsafe {
-    SCContentFilter::initWithDesktopIndependentWindow(SCContentFilter::alloc(), &sc_window)
-  };
+  let filter = unsafe { SCContentFilter::initWithDesktopIndependentWindow(SCContentFilter::alloc(), &sc_window) };
   let config = unsafe { SCStreamConfiguration::init(SCStreamConfiguration::alloc()) };
 
   // Default SCStreamConfiguration has width=height=0, producing a blank image.
@@ -178,7 +171,11 @@ pub fn take_window_screenshot(handle: &WindowHandle) -> Result<Vec<u8>> {
   // windows — read the authoritative size from our own window list.
   let (w_pts, h_pts) = crate::platform::macos::window::list_windows()
     .ok()
-    .and_then(|ws| ws.into_iter().find(|w| w.hwnd == handle.0).map(|w| (w.width as usize, w.height as usize)))
+    .and_then(|ws| {
+      ws.into_iter()
+        .find(|w| w.hwnd == handle.0)
+        .map(|w| (w.width as usize, w.height as usize))
+    })
     .unwrap_or((0, 0));
   if w_pts > 0 && h_pts > 0 {
     let scale: usize = 2; // Retina backing
@@ -204,9 +201,7 @@ pub fn take_window_screenshot(handle: &WindowHandle) -> Result<Vec<u8>> {
   });
 
   unsafe {
-    SCScreenshotManager::captureImageWithFilter_configuration_completionHandler(
-      &filter, &config, Some(&block),
-    );
+    SCScreenshotManager::captureImageWithFilter_configuration_completionHandler(&filter, &config, Some(&block));
   }
 
   let cg_image = match rx.recv_timeout(TIMEOUT) {

@@ -173,7 +173,12 @@ fn get_memory_pressure() -> u32 {
     let mut vm_stat: libc::vm_statistics64 = std::mem::zeroed();
     let mut count = (std::mem::size_of::<libc::vm_statistics64>() / std::mem::size_of::<u32>()) as u32;
     let port = libc::mach_host_self();
-    let kr = libc::host_statistics64(port, libc::HOST_VM_INFO64, &mut vm_stat as *mut _ as *mut libc::integer_t, &mut count);
+    let kr = libc::host_statistics64(
+      port,
+      libc::HOST_VM_INFO64,
+      &mut vm_stat as *mut _ as *mut libc::integer_t,
+      &mut count,
+    );
     if kr != 0 {
       return 50;
     }
@@ -199,7 +204,9 @@ use core_foundation_sys::dictionary::{CFDictionaryGetValue, CFDictionaryRef};
 use core_foundation_sys::number::CFNumberGetValue;
 use core_foundation_sys::string::CFStringGetTypeID;
 use io_kit_sys::types::io_iterator_t;
-use io_kit_sys::{IOIteratorNext, IOObjectRelease, IORegistryEntryCreateCFProperties, IOServiceGetMatchingServices, IOServiceMatching};
+use io_kit_sys::{
+  IOIteratorNext, IOObjectRelease, IORegistryEntryCreateCFProperties, IOServiceGetMatchingServices, IOServiceMatching,
+};
 
 // KIO_MAIN_PORT_DEFAULT is deprecated since macOS 12, replaced by kIOMainPortDefault.
 // io_kit_sys crate hasn't updated yet; define locally (same value: MACH_PORT_NULL).
@@ -223,7 +230,12 @@ fn dict_get_string(dict: CFDictionaryRef, key_name: &str) -> Option<String> {
     let type_id = core_foundation_sys::base::CFGetTypeID(val);
     if type_id == CFStringGetTypeID() {
       let mut buf = [0u8; 512];
-      let ok = CFStringGetCString(val as CFStringRef, buf.as_mut_ptr().cast(), buf.len() as _, kCFStringEncodingUTF8);
+      let ok = CFStringGetCString(
+        val as CFStringRef,
+        buf.as_mut_ptr().cast(),
+        buf.len() as _,
+        kCFStringEncodingUTF8,
+      );
       if ok != 0 {
         let cstr = std::ffi::CStr::from_ptr(buf.as_ptr().cast());
         return Some(cstr.to_string_lossy().into_owned());
@@ -250,7 +262,11 @@ fn dict_get_data_u64(dict: CFDictionaryRef, key_name: &str) -> Option<u64> {
     // Try as CFNumber first
     if type_id == core_foundation_sys::number::CFNumberGetTypeID() {
       let mut result: i64 = 0;
-      let ok = CFNumberGetValue(val as _, core_foundation_sys::number::kCFNumberSInt64Type as _, &mut result as *mut i64 as *mut _);
+      let ok = CFNumberGetValue(
+        val as _,
+        core_foundation_sys::number::kCFNumberSInt64Type as _,
+        &mut result as *mut i64 as *mut _,
+      );
       if ok && result >= 0 {
         return Some(result as u64);
       }
@@ -261,7 +277,14 @@ fn dict_get_data_u64(dict: CFDictionaryRef, key_name: &str) -> Option<u64> {
       let len = core_foundation_sys::data::CFDataGetLength(data);
       if len > 0 && len <= 8 {
         let mut bytes = [0u8; 8];
-        core_foundation_sys::data::CFDataGetBytes(data, core_foundation_sys::base::CFRange { location: 0, length: len }, bytes.as_mut_ptr());
+        core_foundation_sys::data::CFDataGetBytes(
+          data,
+          core_foundation_sys::base::CFRange {
+            location: 0,
+            length: len,
+          },
+          bytes.as_mut_ptr(),
+        );
         // Read as big-endian
         let mut v: u64 = 0;
         for i in 0..len as usize {
@@ -277,7 +300,9 @@ fn dict_get_data_u64(dict: CFDictionaryRef, key_name: &str) -> Option<u64> {
 /// Replaces `pmset -g batt` with IOKit Power Sources
 fn get_battery() -> Option<BatteryInfo> {
   unsafe {
-    use io_kit_sys::ps::power_sources::{IOPSCopyPowerSourcesInfo, IOPSCopyPowerSourcesList, IOPSGetPowerSourceDescription};
+    use io_kit_sys::ps::power_sources::{
+      IOPSCopyPowerSourcesInfo, IOPSCopyPowerSourcesList, IOPSGetPowerSourceDescription,
+    };
 
     let info = IOPSCopyPowerSourcesInfo();
     if info.is_null() {
@@ -336,7 +361,11 @@ fn dict_get_i64_checked(val: *const std::ffi::c_void) -> Option<i64> {
       return None;
     }
     let mut result: i64 = 0;
-    let ok = CFNumberGetValue(val as _, core_foundation_sys::number::kCFNumberSInt64Type as _, &mut result as *mut i64 as *mut _);
+    let ok = CFNumberGetValue(
+      val as _,
+      core_foundation_sys::number::kCFNumberSInt64Type as _,
+      &mut result as *mut i64 as *mut _,
+    );
     if ok { Some(result) } else { None }
   }
 }
@@ -377,7 +406,8 @@ fn get_gpus() -> Vec<GpuInfo> {
       }
 
       let mut props: core_foundation_sys::dictionary::CFMutableDictionaryRef = std::ptr::null_mut();
-      let kr = IORegistryEntryCreateCFProperties(service, &mut props, core_foundation_sys::base::kCFAllocatorDefault, 0);
+      let kr =
+        IORegistryEntryCreateCFProperties(service, &mut props, core_foundation_sys::base::kCFAllocatorDefault, 0);
       if kr != KERN_SUCCESS || props.is_null() {
         IOObjectRelease(service);
         continue;
@@ -452,7 +482,8 @@ fn get_usb_devices_io_kit() -> Vec<UsbDeviceInfo> {
       }
 
       let mut props: core_foundation_sys::dictionary::CFMutableDictionaryRef = std::ptr::null_mut();
-      let kr = IORegistryEntryCreateCFProperties(service, &mut props, core_foundation_sys::base::kCFAllocatorDefault, 0);
+      let kr =
+        IORegistryEntryCreateCFProperties(service, &mut props, core_foundation_sys::base::kCFAllocatorDefault, 0);
       if kr != KERN_SUCCESS || props.is_null() {
         IOObjectRelease(service);
         continue;
@@ -571,7 +602,9 @@ fn default_output_device() -> Result<u32> {
     )
   };
   if status != 0 {
-    return Err(anyhow::anyhow!("failed to get default output device: OSStatus {status}"));
+    return Err(anyhow::anyhow!(
+      "failed to get default output device: OSStatus {status}"
+    ));
   }
   Ok(device_id)
 }
@@ -589,7 +622,13 @@ fn get_audio_devices() -> Vec<AudioDeviceInfo> {
 
   let mut data_size: u32 = 0;
   let status = unsafe {
-    AudioObjectGetPropertyDataSize(K_AUDIO_OBJECT_SYSTEM_OBJECT, &address, 0, std::ptr::null(), &mut data_size)
+    AudioObjectGetPropertyDataSize(
+      K_AUDIO_OBJECT_SYSTEM_OBJECT,
+      &address,
+      0,
+      std::ptr::null(),
+      &mut data_size,
+    )
   };
   if status != 0 || data_size == 0 {
     return devices;
@@ -621,9 +660,7 @@ fn get_audio_devices() -> Vec<AudioDeviceInfo> {
       mElement: K_AUDIO_OBJECT_PROPERTY_ELEMENT_MAIN,
     };
     let mut stream_size: u32 = 0;
-    let st = unsafe {
-      AudioObjectGetPropertyDataSize(dev_id, &stream_addr, 0, std::ptr::null(), &mut stream_size)
-    };
+    let st = unsafe { AudioObjectGetPropertyDataSize(dev_id, &stream_addr, 0, std::ptr::null(), &mut stream_size) };
     if st != 0 || stream_size == 0 {
       continue; // No output channels — skip
     }
@@ -650,7 +687,9 @@ fn get_audio_devices() -> Vec<AudioDeviceInfo> {
       let mut cbuf = [0u8; 256];
       let ok = unsafe { CFStringGetCString(cf_str, cbuf.as_mut_ptr().cast(), cbuf.len() as _, kCFStringEncodingUTF8) };
       if ok != 0 {
-        unsafe { std::ffi::CStr::from_ptr(cbuf.as_ptr().cast()) }.to_string_lossy().into_owned()
+        unsafe { std::ffi::CStr::from_ptr(cbuf.as_ptr().cast()) }
+          .to_string_lossy()
+          .into_owned()
       } else {
         format!("Device {dev_id}")
       }
@@ -667,7 +706,14 @@ fn get_audio_devices() -> Vec<AudioDeviceInfo> {
     let mut vol: f32 = 0.0;
     let mut vol_size = std::mem::size_of::<f32>() as u32;
     let _ = unsafe {
-      AudioObjectGetPropertyData(dev_id, &vol_addr, 0, std::ptr::null(), &mut vol_size, &mut vol as *mut f32 as *mut c_void)
+      AudioObjectGetPropertyData(
+        dev_id,
+        &vol_addr,
+        0,
+        std::ptr::null(),
+        &mut vol_size,
+        &mut vol as *mut f32 as *mut c_void,
+      )
     };
 
     // Get mute
@@ -679,7 +725,14 @@ fn get_audio_devices() -> Vec<AudioDeviceInfo> {
     let mut muted: u32 = 0;
     let mut mute_size = std::mem::size_of::<u32>() as u32;
     let _ = unsafe {
-      AudioObjectGetPropertyData(dev_id, &mute_addr, 0, std::ptr::null(), &mut mute_size, &mut muted as *mut u32 as *mut c_void)
+      AudioObjectGetPropertyData(
+        dev_id,
+        &mute_addr,
+        0,
+        std::ptr::null(),
+        &mut mute_size,
+        &mut muted as *mut u32 as *mut c_void,
+      )
     };
 
     devices.push(AudioDeviceInfo {
@@ -701,10 +754,7 @@ fn get_audio_devices() -> Vec<AudioDeviceInfo> {
 
 fn get_startup_entries() -> Vec<StartupEntry> {
   let mut entries = Vec::new();
-  let dirs = [
-    "/Library/LaunchAgents",
-    "/Library/LaunchDaemons",
-  ];
+  let dirs = ["/Library/LaunchAgents", "/Library/LaunchDaemons"];
   let home_dir = std::env::var("HOME").unwrap_or_default();
   let home_agents = format!("{home_dir}/Library/LaunchAgents");
 
@@ -719,8 +769,7 @@ fn get_startup_entries() -> Vec<StartupEntry> {
         continue;
       };
       // Extract ProgramArguments to get the command
-      let command = read_plist_string(&path.to_string_lossy(), "Program")
-        .unwrap_or_else(|| label.clone());
+      let command = read_plist_string(&path.to_string_lossy(), "Program").unwrap_or_else(|| label.clone());
       entries.push(StartupEntry {
         name: label,
         command,
@@ -793,10 +842,13 @@ pub fn get_system_info() -> Result<SystemInfo> {
   let username = std::env::var("USER").unwrap_or_default();
 
   // OS version from SystemVersion.plist (replaces sw_vers)
-  let os_version = read_plist_string("/System/Library/CoreServices/SystemVersion.plist", "ProductVersion")
-    .unwrap_or_default();
-  let build_str = read_plist_string("/System/Library/CoreServices/SystemVersion.plist", "ProductBuildVersion")
-    .unwrap_or_default();
+  let os_version =
+    read_plist_string("/System/Library/CoreServices/SystemVersion.plist", "ProductVersion").unwrap_or_default();
+  let build_str = read_plist_string(
+    "/System/Library/CoreServices/SystemVersion.plist",
+    "ProductBuildVersion",
+  )
+  .unwrap_or_default();
   let version_string = format!("macOS {os_version} ({build_str})");
 
   // Locale
@@ -956,12 +1008,8 @@ pub fn list_bluetooth_devices() -> Result<Vec<BluetoothDeviceInfo>> {
         break;
       }
       let mut props: core_foundation_sys::dictionary::CFMutableDictionaryRef = std::ptr::null_mut();
-      let kr = IORegistryEntryCreateCFProperties(
-        service,
-        &mut props,
-        core_foundation_sys::base::kCFAllocatorDefault,
-        0,
-      );
+      let kr =
+        IORegistryEntryCreateCFProperties(service, &mut props, core_foundation_sys::base::kCFAllocatorDefault, 0);
       if kr == 0 && !props.is_null() {
         let dict = props as core_foundation_sys::dictionary::CFDictionaryRef;
         let name = dict_get_string(dict, "Name")
@@ -1270,11 +1318,10 @@ fn get_connected_bssid(wifi_device: &str) -> Option<String> {
   // Get default gateway IP
   let output = std::process::Command::new("netstat").args(["-rn"]).output().ok()?;
   let stdout = String::from_utf8_lossy(&output.stdout);
-  let gateway_ip = stdout.lines()
+  let gateway_ip = stdout
+    .lines()
     .find(|line| line.starts_with("default") && line.contains(wifi_device))
-    .and_then(|line| {
-      line.split_whitespace().nth(1)
-    })?;
+    .and_then(|line| line.split_whitespace().nth(1))?;
 
   // Get MAC address of gateway from arp table
   let output = std::process::Command::new("arp").args(["-a", "-n"]).output().ok()?;

@@ -36,8 +36,14 @@ pub trait MouseControl {
 // Keyboard Control
 // ============================================================
 pub trait KeyboardControl {
-  fn type_text(&self, scope: ElementScope, text: &str, position: Option<(f64, f64)>, enter: bool, clear: bool)
-    -> Result<()>;
+  fn type_text(
+    &self,
+    scope: ElementScope,
+    text: &str,
+    position: Option<(f64, f64)>,
+    enter: bool,
+    clear: bool,
+  ) -> Result<()>;
   fn send_keys(&self, keys: &[KeyCode], modifiers: Option<&[KeyCode]>) -> Result<()>;
   fn key_down(&self, key: KeyCode) -> Result<()>;
   fn key_release(&self, key: KeyCode) -> Result<()>;

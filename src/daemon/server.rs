@@ -69,7 +69,9 @@ fn run_named_pipe_server<P: PlatformProvider + Send + Sync + 'static>(platform: 
     let platform = platform.clone();
     let raw_handle = pipe_handle.0 as usize;
     std::thread::spawn(move || {
-      // Wrap the raw HANDLE into a File for buffered I/O
+      use super::handler::handle_request;
+      use super::protocol::Request;
+      use std::io::{BufRead, BufReader, Write};
       use std::os::windows::io::FromRawHandle;
       use windows::Win32::Foundation::HANDLE;
       let pipe_handle = HANDLE(raw_handle as *mut core::ffi::c_void);

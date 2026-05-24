@@ -20,7 +20,11 @@ pub fn dispatch<P: PlatformProvider + ?Sized>(
     // ── Window ────────────────────────────────────────────────────────────────
     "window.list" => {
       let all = params["all"].as_bool().unwrap_or(false);
-      let windows = if all { platform.list_windows()? } else { platform.list_visible_windows()? };
+      let windows = if all {
+        platform.list_windows()?
+      } else {
+        platform.list_visible_windows()?
+      };
       Ok(json!(windows))
     }
     "window.find" => {
@@ -30,7 +34,11 @@ pub fn dispatch<P: PlatformProvider + ?Sized>(
       if let Some(p) = pid {
         return Ok(json!(platform.get_windows_by_process_id(p)?));
       }
-      let (pattern, process_filter) = match (title, process) { (Some(t), p) => (t, p), (None, Some(p)) => ("", Some(p)), (None, None) => ("", None), };
+      let (pattern, process_filter) = match (title, process) {
+        (Some(t), p) => (t, p),
+        (None, Some(p)) => ("", Some(p)),
+        (None, None) => ("", None),
+      };
       Ok(json!(platform.find_windows_by_title(pattern, process_filter)?))
     }
     "window.info" => {
@@ -158,14 +166,14 @@ pub fn dispatch<P: PlatformProvider + ?Sized>(
       Ok(json!(null))
     }
     "keyboard.key_down" => {
-      let key: KeyCode = serde_json::from_value(params["key"].clone())
-        .map_err(|e| anyhow::anyhow!("invalid key: {e}"))?;
+      let key: KeyCode =
+        serde_json::from_value(params["key"].clone()).map_err(|e| anyhow::anyhow!("invalid key: {e}"))?;
       platform.key_down(key)?;
       Ok(json!(null))
     }
     "keyboard.key_up" => {
-      let key: KeyCode = serde_json::from_value(params["key"].clone())
-        .map_err(|e| anyhow::anyhow!("invalid key: {e}"))?;
+      let key: KeyCode =
+        serde_json::from_value(params["key"].clone()).map_err(|e| anyhow::anyhow!("invalid key: {e}"))?;
       platform.key_release(key)?;
       Ok(json!(null))
     }
@@ -210,7 +218,11 @@ pub fn dispatch<P: PlatformProvider + ?Sized>(
         .iter()
         .filter(|e| e.x() >= 0 && e.y() >= 0 && e.width() > 8 && e.height() > 8)
         .collect();
-      let pool = if visible.is_empty() { candidates.iter().collect() } else { visible };
+      let pool = if visible.is_empty() {
+        candidates.iter().collect()
+      } else {
+        visible
+      };
       let nth = q.index.unwrap_or(0);
       let elem = pool
         .get(nth)
@@ -405,7 +417,10 @@ pub fn dispatch<P: PlatformProvider + ?Sized>(
         let f_lower = f.to_lowercase();
         software.retain(|s| {
           s.name.to_lowercase().contains(&f_lower)
-            || s.publisher.as_ref().is_some_and(|p| p.to_lowercase().contains(&f_lower))
+            || s
+              .publisher
+              .as_ref()
+              .is_some_and(|p| p.to_lowercase().contains(&f_lower))
         });
       }
       Ok(json!(software))
@@ -416,7 +431,11 @@ pub fn dispatch<P: PlatformProvider + ?Sized>(
       let name = req_str(params, "name")?;
       let command = req_str(params, "command")?;
       let location = params["location"].as_str().unwrap_or("HKCU");
-      let root = if location.to_uppercase() == "HKLM" { "HKLM" } else { "HKCU" };
+      let root = if location.to_uppercase() == "HKLM" {
+        "HKLM"
+      } else {
+        "HKCU"
+      };
       let key_path = format!("{root}\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run");
       platform.set_value(&key_path, name, "REG_SZ", command)?;
       Ok(json!(null))
@@ -424,7 +443,11 @@ pub fn dispatch<P: PlatformProvider + ?Sized>(
     "startup.remove" => {
       let name = req_str(params, "name")?;
       let location = params["location"].as_str().unwrap_or("HKCU");
-      let root = if location.to_uppercase() == "HKLM" { "HKLM" } else { "HKCU" };
+      let root = if location.to_uppercase() == "HKLM" {
+        "HKLM"
+      } else {
+        "HKCU"
+      };
       let key_path = format!("{root}\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run");
       platform.delete_value(&key_path, name)?;
       Ok(json!(null))
@@ -488,7 +511,10 @@ fn parse_scope<P: PlatformProvider + ?Sized>(
     }
     // Fallback to window-based lookup
     let wins = platform.find_windows_by_process(name)?;
-    let w = wins.into_iter().next().ok_or_else(|| anyhow::anyhow!("app not found: {name}"))?;
+    let w = wins
+      .into_iter()
+      .next()
+      .ok_or_else(|| anyhow::anyhow!("app not found: {name}"))?;
     return Ok(ElementScope::Window(WindowHandle(w.hwnd)));
   }
   Ok(ElementScope::Foreground)
@@ -501,10 +527,7 @@ fn parse_scope<P: PlatformProvider + ?Sized>(
 /// at a time from a Terminal, the Terminal re-claims focus between commands,
 /// so input meant for the target app gets swallowed by the shell. Every
 /// input-injection method must call this first.
-fn ensure_foreground<P: PlatformProvider + ?Sized>(
-  platform: &P,
-  scope: &ElementScope,
-) -> crate::error::Result<()> {
+fn ensure_foreground<P: PlatformProvider + ?Sized>(platform: &P, scope: &ElementScope) -> crate::error::Result<()> {
   let pid = match scope {
     ElementScope::Application(pid) => Some(*pid),
     ElementScope::Window(h) => platform

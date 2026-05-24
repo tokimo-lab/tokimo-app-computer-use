@@ -207,7 +207,7 @@ pub enum MouseButton {
 }
 
 /// System information
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SystemInfo {
   #[serde(default, skip_serializing_if = "String::is_empty")]
   pub computer_name: String,

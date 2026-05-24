@@ -107,8 +107,27 @@ fn needs_shift(c: char) -> bool {
   c.is_ascii_uppercase()
     || matches!(
       c,
-      '!' | '@' | '#' | '$' | '%' | '^' | '&' | '*' | '(' | ')' | '_'
-        | '+' | '{' | '}' | '|' | ':' | '"' | '<' | '>' | '?' | '~'
+      '!'
+        | '@'
+        | '#'
+        | '$'
+        | '%'
+        | '^'
+        | '&'
+        | '*'
+        | '('
+        | ')'
+        | '_'
+        | '+'
+        | '{'
+        | '}'
+        | '|'
+        | ':'
+        | '"'
+        | '<'
+        | '>'
+        | '?'
+        | '~'
     )
 }
 
@@ -229,16 +248,8 @@ fn send_unicode_char(ch: char) -> Result<()> {
     use foreign_types::ForeignType;
     let down_ref = down.as_ptr();
     let up_ref = up.as_ptr();
-    CGEventKeyboardSetUnicodeString(
-      down_ref,
-      utf16.len() as CGItemCount,
-      utf16.as_ptr(),
-    );
-    CGEventKeyboardSetUnicodeString(
-      up_ref,
-      utf16.len() as CGItemCount,
-      utf16.as_ptr(),
-    );
+    CGEventKeyboardSetUnicodeString(down_ref, utf16.len() as CGItemCount, utf16.as_ptr());
+    CGEventKeyboardSetUnicodeString(up_ref, utf16.len() as CGItemCount, utf16.as_ptr());
   }
 
   post_event(&down)?;
@@ -254,8 +265,8 @@ fn send_key_event(kc: u16, flags: CGEventFlags) -> Result<()> {
   down.set_flags(flags);
   post_event(&down)?;
 
-  let up = CGEvent::new_keyboard_event(source, kc, false)
-    .map_err(|_| anyhow::anyhow!("failed to create key up event"))?;
+  let up =
+    CGEvent::new_keyboard_event(source, kc, false).map_err(|_| anyhow::anyhow!("failed to create key up event"))?;
   up.set_flags(flags);
   post_event(&up)?;
 
@@ -270,8 +281,8 @@ fn send_key_event_to_pid(kc: u16, flags: CGEventFlags, pid: i32) -> Result<()> {
   down.set_flags(flags);
   post_event_to_pid(&down, pid);
 
-  let up = CGEvent::new_keyboard_event(source, kc, false)
-    .map_err(|_| anyhow::anyhow!("failed to create key up event"))?;
+  let up =
+    CGEvent::new_keyboard_event(source, kc, false).map_err(|_| anyhow::anyhow!("failed to create key up event"))?;
   up.set_flags(flags);
   post_event_to_pid(&up, pid);
 
@@ -316,18 +327,38 @@ pub fn send_keys_to_pid(pid: i32, keys: &[KeyCode], modifiers: Option<&[KeyCode]
 
   if let Some(mods) = modifiers {
     for m in mods {
-      if is_shift_key(m) { shift = true; }
-      if is_ctrl_key(m) { ctrl = true; }
-      if is_alt_key(m) { alt = true; }
-      if is_win_key(m) { cmd = true; }
+      if is_shift_key(m) {
+        shift = true;
+      }
+      if is_ctrl_key(m) {
+        ctrl = true;
+      }
+      if is_alt_key(m) {
+        alt = true;
+      }
+      if is_win_key(m) {
+        cmd = true;
+      }
     }
   }
 
   for key in keys {
-    if is_shift_key(key) { shift = true; continue; }
-    if is_ctrl_key(key) { ctrl = true; continue; }
-    if is_alt_key(key) { alt = true; continue; }
-    if is_win_key(key) { cmd = true; continue; }
+    if is_shift_key(key) {
+      shift = true;
+      continue;
+    }
+    if is_ctrl_key(key) {
+      ctrl = true;
+      continue;
+    }
+    if is_alt_key(key) {
+      alt = true;
+      continue;
+    }
+    if is_win_key(key) {
+      cmd = true;
+      continue;
+    }
 
     if let Some(kc) = cg_keycode(key) {
       let flags = build_modifiers(shift, ctrl, alt, cmd);
@@ -377,19 +408,39 @@ pub fn send_keys(keys: &[KeyCode], modifiers: Option<&[KeyCode]>) -> Result<()> 
   // Collect modifiers from the modifiers parameter
   if let Some(mods) = modifiers {
     for m in mods {
-      if is_shift_key(m) { shift = true; }
-      if is_ctrl_key(m) { ctrl = true; }
-      if is_alt_key(m) { alt = true; }
-      if is_win_key(m) { cmd = true; }
+      if is_shift_key(m) {
+        shift = true;
+      }
+      if is_ctrl_key(m) {
+        ctrl = true;
+      }
+      if is_alt_key(m) {
+        alt = true;
+      }
+      if is_win_key(m) {
+        cmd = true;
+      }
     }
   }
 
   for key in keys {
     // Keys that are themselves modifiers
-    if is_shift_key(key) { shift = true; continue; }
-    if is_ctrl_key(key) { ctrl = true; continue; }
-    if is_alt_key(key) { alt = true; continue; }
-    if is_win_key(key) { cmd = true; continue; }
+    if is_shift_key(key) {
+      shift = true;
+      continue;
+    }
+    if is_ctrl_key(key) {
+      ctrl = true;
+      continue;
+    }
+    if is_alt_key(key) {
+      alt = true;
+      continue;
+    }
+    if is_win_key(key) {
+      cmd = true;
+      continue;
+    }
 
     if let Some(kc) = cg_keycode(key) {
       let flags = build_modifiers(shift, ctrl, alt, cmd);
@@ -403,8 +454,8 @@ pub fn send_keys(keys: &[KeyCode], modifiers: Option<&[KeyCode]>) -> Result<()> 
 pub fn key_down(key: KeyCode) -> Result<()> {
   let source = create_source()?;
   if let Some(kc) = cg_keycode(&key) {
-    let event = CGEvent::new_keyboard_event(source, kc, true)
-      .map_err(|_| anyhow::anyhow!("failed to create key down event"))?;
+    let event =
+      CGEvent::new_keyboard_event(source, kc, true).map_err(|_| anyhow::anyhow!("failed to create key down event"))?;
     post_event(&event)?;
   }
   Ok(())
@@ -413,8 +464,8 @@ pub fn key_down(key: KeyCode) -> Result<()> {
 pub fn key_release(key: KeyCode) -> Result<()> {
   let source = create_source()?;
   if let Some(kc) = cg_keycode(&key) {
-    let event = CGEvent::new_keyboard_event(source, kc, false)
-      .map_err(|_| anyhow::anyhow!("failed to create key up event"))?;
+    let event =
+      CGEvent::new_keyboard_event(source, kc, false).map_err(|_| anyhow::anyhow!("failed to create key up event"))?;
     post_event(&event)?;
   }
   Ok(())

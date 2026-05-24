@@ -23,22 +23,23 @@ pub enum KeyboardAction {
     clear: bool,
   },
   /// Press a key combination (e.g. "Ctrl+C", "Alt+F4")
-  Press {
-    combo: String,
-  },
+  Press { combo: String },
   /// Hold a key down
-  Down {
-    key: String,
-  },
+  Down { key: String },
   /// Release a key
-  Up {
-    key: String,
-  },
+  Up { key: String },
 }
 
 pub fn cmd(executor: &mut dyn CommandExecutor, action: KeyboardAction) -> Result<()> {
   match action {
-    KeyboardAction::Type { text, sel, x, y, enter, clear } => {
+    KeyboardAction::Type {
+      text,
+      sel,
+      x,
+      y,
+      enter,
+      clear,
+    } => {
       let mut params = sel.to_json_scope();
       params["text"] = json!(text);
       params["enter"] = json!(enter);
@@ -55,14 +56,12 @@ pub fn cmd(executor: &mut dyn CommandExecutor, action: KeyboardAction) -> Result
       println!("ok");
     }
     KeyboardAction::Down { key } => {
-      let key_val: serde_json::Value =
-        serde_json::from_str(&format!("\"{key}\"")).context("invalid key name")?;
+      let key_val: serde_json::Value = serde_json::from_str(&format!("\"{key}\"")).context("invalid key name")?;
       executor.call("keyboard.key_down", json!({"key": key_val}))?;
       println!("ok");
     }
     KeyboardAction::Up { key } => {
-      let key_val: serde_json::Value =
-        serde_json::from_str(&format!("\"{key}\"")).context("invalid key name")?;
+      let key_val: serde_json::Value = serde_json::from_str(&format!("\"{key}\"")).context("invalid key name")?;
       executor.call("keyboard.key_up", json!({"key": key_val}))?;
       println!("ok");
     }
