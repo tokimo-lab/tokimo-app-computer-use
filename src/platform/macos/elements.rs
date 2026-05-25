@@ -89,6 +89,7 @@ pub struct MacElement {
   cached_position: Option<(f64, f64)>,
   cached_size: Option<(f64, f64)>,
   cached_enabled: bool,
+  stable_id: String,
 }
 
 // SAFETY: AXUIElement wraps a *mut __AXUIElement which is a Core Foundation type.
@@ -97,6 +98,10 @@ unsafe impl Send for MacElement {}
 
 impl MacElement {
   pub fn new(element: AXUIElement) -> Self {
+    Self::new_with_stable_id(element, String::new())
+  }
+
+  pub fn new_with_stable_id(element: AXUIElement, stable_id: String) -> Self {
     let cached_name = element
       .attribute(&AXAttribute::title())
       .ok()
@@ -155,6 +160,7 @@ impl MacElement {
       cached_position,
       cached_size,
       cached_enabled,
+      stable_id,
     }
   }
 }
@@ -401,6 +407,10 @@ pub fn dump_attributes(element: &AXUIElement) -> String {
 }
 
 impl Element for MacElement {
+  fn stable_id(&self) -> String {
+    self.stable_id.clone()
+  }
+
   fn automation_id(&self) -> String {
     self
       .element
@@ -1309,22 +1319,22 @@ fn bfs_query_with_extra(
   let mut results = Vec::new();
   // Dedup visited elements by CFHashCode (AXUIElement implements CFEqual/CFHash).
   let mut visited: std::collections::HashSet<usize> = std::collections::HashSet::new();
-  let mut queue: VecDeque<(AXUIElement, usize)> = VecDeque::new();
+  let mut queue: VecDeque<(AXUIElement, usize, String)> = VecDeque::new();
 
-  let mut push =
-    |q: &mut VecDeque<(AXUIElement, usize)>, v: &mut std::collections::HashSet<usize>, e: AXUIElement, d: usize| {
+  let push =
+    |q: &mut VecDeque<(AXUIElement, usize, String)>, v: &mut std::collections::HashSet<usize>, e: AXUIElement, d: usize, path: String| {
       let key = ax_identity_key(&e);
       if v.insert(key) {
-        q.push_back((e, d));
+        q.push_back((e, d, path));
       }
     };
 
-  push(&mut queue, &mut visited, root.clone(), 0);
-  for e in extra_roots {
-    push(&mut queue, &mut visited, e.clone(), 0);
+  push(&mut queue, &mut visited, root.clone(), 0, "0".to_string());
+  for (i, e) in extra_roots.iter().enumerate() {
+    push(&mut queue, &mut visited, e.clone(), 0, format!("extra/{}", i));
   }
 
-  while let Some((elem, depth)) = queue.pop_front() {
+  while let Some((elem, depth, ref path)) = queue.pop_front() {
     let role = elem
       .attribute(&AXAttribute::role())
       .ok()
@@ -1396,15 +1406,16 @@ fn bfs_query_with_extra(
       };
 
       if text_ok {
-        results.push(MacElement::new(elem.clone()));
+        results.push(MacElement::new_with_stable_id(elem.clone(), path.clone()));
       }
     }
 
     if depth < max_depth {
-      for child in get_children_safely(&elem) {
+      for (i, child) in get_children_safely(&elem).into_iter().enumerate() {
         let key = ax_identity_key(&child);
         if visited.insert(key) {
-          queue.push_back((child, depth + 1));
+          let child_path = format!("{}/{}", path, i);
+          queue.push_back((child, depth + 1, child_path));
         }
       }
     }

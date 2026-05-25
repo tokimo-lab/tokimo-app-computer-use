@@ -1,9 +1,3 @@
-#[cfg(not(windows))]
-fn main() {
-  // daemon runs on Windows only
-}
-
-#[cfg(windows)]
 fn main() {
   println!("tokimo-app-computer-daemon v{}", env!("CARGO_PKG_VERSION"));
 

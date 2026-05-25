@@ -76,6 +76,9 @@ pub trait WindowManager {
 // Element (UI Automation element)
 // ============================================================
 pub trait Element: Send {
+  fn stable_id(&self) -> String {
+    String::new()
+  }
   fn automation_id(&self) -> String;
   fn name(&self) -> String;
   fn class_name(&self) -> String;

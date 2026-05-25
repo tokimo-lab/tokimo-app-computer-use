@@ -22,19 +22,15 @@ mod window;
 use std::cmp::max;
 use std::fmt::Write as _;
 
+use std::io::{BufRead, BufReader, Write};
+
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
 use serde_json::Value;
 use tokimo_bus_cli::TokimoAuthArgs;
 
 #[cfg(windows)]
-use std::io::{BufRead, BufReader, Write};
-
-#[cfg(windows)]
 use std::os::windows::process::CommandExt;
-
-#[cfg(not(windows))]
-use crate::platform::PlatformProvider;
 
 // ── Command Executor abstraction ──
 
@@ -42,42 +38,16 @@ pub(crate) trait CommandExecutor {
   fn call(&mut self, method: &str, params: Value) -> Result<Value>;
 }
 
-// ── DirectExecutor: calls PlatformProvider directly (non-Windows) ──
+// ── IpcClient: IPC via named pipe (Windows) or Unix socket (macOS/Linux) ──
 
-#[cfg(not(windows))]
-struct DirectExecutor {
-  platform: Box<dyn PlatformProvider + Send + Sync>,
-  cache: crate::daemon::cache::SnapshotCache,
-}
-
-#[cfg(not(windows))]
-impl DirectExecutor {
-  fn new(platform: impl PlatformProvider + Send + Sync + 'static) -> Self {
-    Self {
-      platform: Box::new(platform),
-      cache: crate::daemon::cache::SnapshotCache::new(),
-    }
-  }
-}
-
-#[cfg(not(windows))]
-impl CommandExecutor for DirectExecutor {
-  fn call(&mut self, method: &str, params: Value) -> Result<Value> {
-    crate::daemon::handler::dispatch(self.platform.as_ref(), &self.cache, method, &params)
-  }
-}
-
-// ── PipeClient: IPC via named pipe (Windows only) ──
-
-#[cfg(windows)]
-struct PipeClient {
-  reader: BufReader<std::fs::File>,
-  writer: std::fs::File,
+struct IpcClient {
+  reader: BufReader<Box<dyn std::io::Read + Send>>,
+  writer: Box<dyn std::io::Write + Send>,
   next_id: u64,
 }
 
-#[cfg(windows)]
-impl PipeClient {
+impl IpcClient {
+  #[cfg(windows)]
   fn connect(pipe_name: &str) -> Result<Self> {
     let file = std::fs::OpenOptions::new()
       .read(true)
@@ -86,18 +56,34 @@ impl PipeClient {
       .with_context(|| format!("cannot connect to daemon at {pipe_name}"))?;
 
     let reader_file = file.try_clone()?;
-    let reader = BufReader::new(reader_file);
+    let reader = BufReader::new(Box::new(reader_file));
 
     Ok(Self {
       reader,
-      writer: file,
+      writer: Box::new(file),
+      next_id: 1,
+    })
+  }
+
+  #[cfg(unix)]
+  fn connect(socket_path: &str) -> Result<Self> {
+    use std::os::unix::net::UnixStream;
+
+    let stream = UnixStream::connect(socket_path)
+      .with_context(|| format!("cannot connect to daemon at {socket_path}"))?;
+
+    let reader_stream = stream.try_clone()?;
+    let reader = BufReader::new(Box::new(reader_stream) as Box<dyn std::io::Read + Send>);
+
+    Ok(Self {
+      reader,
+      writer: Box::new(stream) as Box<dyn std::io::Write + Send>,
       next_id: 1,
     })
   }
 }
 
-#[cfg(windows)]
-impl CommandExecutor for PipeClient {
+impl CommandExecutor for IpcClient {
   fn call(&mut self, method: &str, params: Value) -> Result<Value> {
     use crate::daemon::protocol::{Request, Response};
 
@@ -128,10 +114,10 @@ impl CommandExecutor for PipeClient {
 }
 
 #[cfg(windows)]
-fn try_connect_or_spawn_daemon() -> Result<PipeClient> {
+fn try_connect_or_spawn_daemon() -> Result<IpcClient> {
   use crate::daemon::PIPE_NAME;
 
-  if let Ok(client) = PipeClient::connect(PIPE_NAME) {
+  if let Ok(client) = IpcClient::connect(PIPE_NAME) {
     return Ok(client);
   }
 
@@ -143,7 +129,7 @@ fn try_connect_or_spawn_daemon() -> Result<PipeClient> {
 
   for _ in 0..50 {
     std::thread::sleep(std::time::Duration::from_millis(100));
-    if let Ok(client) = PipeClient::connect(PIPE_NAME) {
+    if let Ok(client) = IpcClient::connect(PIPE_NAME) {
       return Ok(client);
     }
   }
@@ -201,6 +187,133 @@ fn is_daemon_running() -> bool {
   false
 }
 
+#[cfg(unix)]
+fn try_connect_or_spawn_daemon() -> Result<IpcClient> {
+  use crate::daemon::server::SOCKET_PATH;
+
+  if let Ok(client) = IpcClient::connect(SOCKET_PATH) {
+    return Ok(client);
+  }
+
+  spawn_daemon_background()?;
+
+  for _ in 0..50 {
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    if let Ok(client) = IpcClient::connect(SOCKET_PATH) {
+      return Ok(client);
+    }
+  }
+
+  Err(anyhow!("daemon socket not available after 5s — check daemon logs"))
+}
+
+#[cfg(unix)]
+fn spawn_daemon_background() -> Result<()> {
+  let exe = std::env::current_exe()?;
+  let daemon_path = exe.with_file_name("tokimo-app-computer-daemon");
+
+  if !daemon_path.exists() {
+    return Err(anyhow!("daemon binary not found at {}", daemon_path.display()));
+  }
+
+  std::process::Command::new(&daemon_path)
+    .spawn()
+    .context("failed to spawn daemon")?;
+
+  Ok(())
+}
+
+// ── Daemon management ──
+
+#[derive(Subcommand, Debug)]
+pub enum DaemonAction {
+  /// Start the daemon process
+  Start,
+  /// Stop the daemon process
+  Stop,
+  /// Show daemon status
+  Status,
+}
+
+#[cfg(unix)]
+fn daemon_pid() -> Option<u32> {
+  use std::process::Command;
+  // Use -x for exact match on process name (not arguments)
+  let output = Command::new("pgrep")
+    .arg("-x")
+    .arg("tokimo-app-computer-daemon")
+    .output()
+    .ok()?;
+  let stdout = String::from_utf8_lossy(&output.stdout);
+  // Get the first PID, but skip our own process if somehow matched
+  let self_pid = std::process::id();
+  for line in stdout.trim().lines() {
+    if let Ok(pid) = line.parse::<u32>() {
+      if pid != self_pid {
+        return Some(pid);
+      }
+    }
+  }
+  None
+}
+
+#[cfg(unix)]
+fn is_daemon_running() -> bool {
+  daemon_pid().is_some()
+}
+
+fn handle_daemon_action(action: DaemonAction) -> Result<()> {
+  match action {
+    DaemonAction::Start => {
+      if is_daemon_running() {
+        println!("Daemon is already running (PID: {})", daemon_pid().unwrap());
+        return Ok(());
+      }
+      spawn_daemon_background()?;
+      // Wait for socket to appear
+      for _ in 0..50 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if is_daemon_running() {
+          println!("Daemon started (PID: {})", daemon_pid().unwrap());
+          return Ok(());
+        }
+      }
+      Err(anyhow!("daemon failed to start within 5s"))
+    }
+    DaemonAction::Stop => {
+      if !is_daemon_running() {
+        println!("Daemon is not running");
+        return Ok(());
+      }
+      let pid = daemon_pid().unwrap();
+      #[cfg(unix)]
+      {
+        std::process::Command::new("kill")
+          .arg(pid.to_string())
+          .status()
+          .context("failed to kill daemon")?;
+      }
+      #[cfg(windows)]
+      {
+        std::process::Command::new("taskkill")
+          .args(["/PID", &pid.to_string(), "/F"])
+          .status()
+          .context("failed to kill daemon")?;
+      }
+      println!("Daemon stopped (PID: {pid})");
+      Ok(())
+    }
+    DaemonAction::Status => {
+      if let Some(pid) = daemon_pid() {
+        println!("Daemon is running (PID: {pid})");
+      } else {
+        println!("Daemon is not running");
+      }
+      Ok(())
+    }
+  }
+}
+
 // ── CLI definition ──
 
 #[derive(Parser, Debug)]
@@ -219,6 +332,11 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
+  /// Daemon process management
+  Daemon {
+    #[command(subcommand)]
+    action: DaemonAction,
+  },
   /// Window management
   Window {
     #[command(subcommand)]
@@ -344,19 +462,17 @@ pub fn run_cli(cli: Cli) -> Result<()> {
     }
   };
 
+  // Daemon management — does not need our daemon
+  if let Command::Daemon { action } = command {
+    return handle_daemon_action(action);
+  }
+
   // Browser passthrough — does not need our daemon
   if let Command::Browser { args } = command {
     return run_browser_passthrough(args);
   }
 
-  #[cfg(windows)]
   let mut executor: Box<dyn CommandExecutor> = Box::new(try_connect_or_spawn_daemon()?);
-
-  #[cfg(not(windows))]
-  let mut executor: Box<dyn CommandExecutor> = {
-    let platform = crate::create_platform();
-    Box::new(DirectExecutor::new(platform))
-  };
 
   match command {
     Command::Window { action } => window::cmd(&mut *executor, action),
@@ -378,6 +494,7 @@ pub fn run_cli(cli: Cli) -> Result<()> {
     Command::Battery { action } => battery::cmd(&mut *executor, action),
     Command::Registry { action } => registry::cmd(&mut *executor, action),
     Command::Software { action } => software::cmd(&mut *executor, action),
+    Command::Daemon { .. } => unreachable!("Daemon handled above"),
     Command::Browser { .. } => unreachable!("Browser handled above"),
   }
 }

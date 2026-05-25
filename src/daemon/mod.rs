@@ -6,6 +6,9 @@ pub mod server;
 #[cfg(windows)]
 pub use server::PIPE_NAME;
 
+#[cfg(unix)]
+pub use server::SOCKET_PATH;
+
 use std::sync::Arc;
 
 use crate::create_platform;

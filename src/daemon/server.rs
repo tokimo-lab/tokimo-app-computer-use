@@ -8,6 +8,10 @@ use super::cache::SnapshotCache;
 #[cfg(windows)]
 pub const PIPE_NAME: &str = r"\\.\pipe\tokimo-app-computer-daemon";
 
+/// Unix socket path on macOS/Linux
+#[cfg(unix)]
+pub const SOCKET_PATH: &str = "/tmp/tokimo-app-computer-daemon.sock";
+
 /// Start the IPC server, blocking the current thread.
 /// Each incoming connection is handled in a new thread.
 pub fn run_server<P: PlatformProvider + Send + Sync + 'static>(
@@ -18,13 +22,9 @@ pub fn run_server<P: PlatformProvider + Send + Sync + 'static>(
   {
     run_named_pipe_server(platform, cache)
   }
-  #[cfg(not(windows))]
+  #[cfg(unix)]
   {
-    let _ = (platform, cache);
-    Err(std::io::Error::new(
-      std::io::ErrorKind::Unsupported,
-      "IPC server not yet implemented for this platform",
-    ))
+    run_unix_socket_server(platform, cache)
   }
 }
 
@@ -118,4 +118,65 @@ fn run_named_pipe_server<P: PlatformProvider + Send + Sync + 'static>(
       drop(file);
     });
   }
+}
+
+#[cfg(unix)]
+fn run_unix_socket_server<P: PlatformProvider + Send + Sync + 'static>(
+  platform: Arc<P>,
+  cache: Arc<SnapshotCache>,
+) -> std::io::Result<()> {
+  use std::os::unix::net::UnixListener;
+
+  // Remove stale socket if exists
+  let _ = std::fs::remove_file(SOCKET_PATH);
+
+  let listener = UnixListener::bind(SOCKET_PATH)?;
+  println!("Starting tokimo-app-computer-daemon on {SOCKET_PATH}");
+
+  for stream in listener.incoming() {
+    let stream = match stream {
+      Ok(s) => s,
+      Err(e) => {
+        eprintln!("Connection failed: {e}");
+        continue;
+      }
+    };
+
+    let platform = platform.clone();
+    let cache = cache.clone();
+    std::thread::spawn(move || {
+      use super::handler::handle_request;
+      use super::protocol::Request;
+      use std::io::{BufRead, BufReader, Write};
+
+      let reader_stream = stream.try_clone().expect("clone unix stream");
+      let reader = BufReader::new(reader_stream);
+      let mut writer = stream;
+
+      for line in reader.lines() {
+        let line = match line {
+          Ok(l) if !l.is_empty() => l,
+          _ => break,
+        };
+
+        let request: Request = match serde_json::from_str(&line) {
+          Ok(r) => r,
+          Err(e) => {
+            let resp = super::protocol::Response::error(0, -32700, format!("parse error: {e}"));
+            let mut resp_json = serde_json::to_string(&resp).unwrap();
+            resp_json.push('\n');
+            let _ = writer.write_all(resp_json.as_bytes());
+            continue;
+          }
+        };
+
+        let resp = handle_request(platform.as_ref(), cache.as_ref(), request);
+        let mut resp_json = serde_json::to_string(&resp).unwrap();
+        resp_json.push('\n');
+        let _ = writer.write_all(resp_json.as_bytes());
+      }
+    });
+  }
+
+  Ok(())
 }

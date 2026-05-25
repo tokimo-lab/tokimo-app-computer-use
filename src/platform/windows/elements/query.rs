@@ -263,6 +263,14 @@ fn current_value(el: &IUIAutomationElement) -> Option<String> {
 // Walk
 // ────────────────────────────────────────────────────────────────────────────
 
+fn compute_runtime_id(el: &IUIAutomationElement) -> String {
+  unsafe {
+    el.CurrentRuntimeId()
+      .map(|ids| ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(" "))
+      .unwrap_or_default()
+  }
+}
+
 fn walk(
   walker: &IUIAutomationTreeWalker,
   el: &IUIAutomationElement,
@@ -276,6 +284,7 @@ fn walk(
     out.push(WindowsElement {
       depth: Some(depth as i32),
       selector: String::new(),
+      stable_id: compute_runtime_id(el),
       element: el.clone(),
     });
   }

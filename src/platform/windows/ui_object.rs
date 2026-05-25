@@ -13,6 +13,7 @@ pub struct WindowsElement {
   pub depth: Option<i32>,
   pub selector: String,
   pub element: IUIAutomationElement,
+  pub stable_id: String,
 }
 
 unsafe impl Send for WindowsElement {}
@@ -261,6 +262,10 @@ impl WindowsElement {
 }
 
 impl Element for WindowsElement {
+  fn stable_id(&self) -> String {
+    self.stable_id.clone()
+  }
+
   fn automation_id(&self) -> String {
     self.automation_id_str()
   }

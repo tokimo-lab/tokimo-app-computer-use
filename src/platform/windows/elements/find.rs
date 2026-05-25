@@ -13,6 +13,14 @@ pub fn find_elements_by_handle_xpath_internal(hwnd: i64, xpath: &str) -> Result<
   parse_xpath(&automation, &window_element, xpath)
 }
 
+fn compute_runtime_id(el: &IUIAutomationElement) -> String {
+  unsafe {
+    el.CurrentRuntimeId()
+      .map(|ids| ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(" "))
+      .unwrap_or_default()
+  }
+}
+
 fn find_elements_with_raw_walker(
   walker: &IUIAutomationTreeWalker,
   start: &IUIAutomationElement,
@@ -31,6 +39,7 @@ fn find_elements_with_raw_walker(
     found.push(WindowsElement {
       depth: None,
       selector: String::new(),
+      stable_id: compute_runtime_id(start),
       element: start.clone(),
     });
   }

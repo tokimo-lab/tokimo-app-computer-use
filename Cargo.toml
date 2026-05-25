@@ -14,14 +14,13 @@ crate-type = ["lib"]
 [[bin]]
 name = "tokimo-app-computer-daemon"
 path = "src/daemon/main.rs"
-required-features = ["windows-daemon"]
 
 [[bin]]
 name = "tokimo-app-computer-use"
 path = "src/main.rs"
 
 [features]
-# Enable daemon binary on Windows only (not needed on macOS)
+# Deprecated: daemon now runs on all platforms
 windows-daemon = []
 
 [dependencies]
