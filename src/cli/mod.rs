@@ -155,38 +155,6 @@ fn spawn_daemon_background() -> Result<()> {
   Ok(())
 }
 
-#[cfg(windows)]
-fn is_daemon_running() -> bool {
-  use windows::Win32::Foundation::CloseHandle;
-  use windows::Win32::System::Diagnostics::ToolHelp::*;
-  let target = "tokimo-app-computer-daemon.exe";
-  unsafe {
-    let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
-      return false;
-    };
-    let mut entry = PROCESSENTRY32W {
-      dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
-      ..Default::default()
-    };
-    if Process32FirstW(snapshot, &mut entry).is_ok() {
-      loop {
-        let name = String::from_utf16_lossy(&entry.szExeFile)
-          .trim_end_matches('\0')
-          .to_string();
-        if name.eq_ignore_ascii_case(target) {
-          let _ = CloseHandle(snapshot);
-          return true;
-        }
-        if Process32NextW(snapshot, &mut entry).is_err() {
-          break;
-        }
-      }
-    }
-    let _ = CloseHandle(snapshot);
-  }
-  false
-}
-
 #[cfg(unix)]
 fn try_connect_or_spawn_daemon() -> Result<IpcClient> {
   use crate::daemon::server::SOCKET_PATH;

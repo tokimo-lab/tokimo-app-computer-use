@@ -15,7 +15,7 @@ pub fn find_elements_by_handle_xpath_internal(hwnd: i64, xpath: &str) -> Result<
 
 fn compute_runtime_id(el: &IUIAutomationElement) -> String {
   unsafe {
-    el.CurrentRuntimeId()
+    el.GetRuntimeId()
       .map(|ids| ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(" "))
       .unwrap_or_default()
   }

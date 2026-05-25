@@ -265,7 +265,7 @@ fn current_value(el: &IUIAutomationElement) -> Option<String> {
 
 fn compute_runtime_id(el: &IUIAutomationElement) -> String {
   unsafe {
-    el.CurrentRuntimeId()
+    el.GetRuntimeId()
       .map(|ids| ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(" "))
       .unwrap_or_default()
   }
