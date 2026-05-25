@@ -56,11 +56,11 @@ impl IpcClient {
       .with_context(|| format!("cannot connect to daemon at {pipe_name}"))?;
 
     let reader_file = file.try_clone()?;
-    let reader = BufReader::new(Box::new(reader_file));
+    let reader = BufReader::new(Box::new(reader_file) as Box<dyn std::io::Read + Send>);
 
     Ok(Self {
       reader,
-      writer: Box::new(file),
+      writer: Box::new(file) as Box<dyn std::io::Write + Send>,
       next_id: 1,
     })
   }
@@ -257,7 +257,23 @@ fn daemon_pid() -> Option<u32> {
   None
 }
 
-#[cfg(unix)]
+#[cfg(windows)]
+fn daemon_pid() -> Option<u32> {
+  use std::process::Command;
+  let output = Command::new("tasklist")
+    .args([
+      "/FI",
+      "IMAGENAME eq tokimo-app-computer-daemon.exe",
+      "/FO",
+      "CSV",
+      "/NH",
+    ])
+    .output()
+    .ok()?;
+  let stdout = String::from_utf8_lossy(&output.stdout);
+  stdout.lines().next()?.split(',').nth(1)?.trim_matches('"').parse().ok()
+}
+
 fn is_daemon_running() -> bool {
   daemon_pid().is_some()
 }
