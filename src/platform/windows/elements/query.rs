@@ -263,12 +263,10 @@ fn current_value(el: &IUIAutomationElement) -> Option<String> {
 // Walk
 // ────────────────────────────────────────────────────────────────────────────
 
-fn compute_runtime_id(el: &IUIAutomationElement) -> String {
-  unsafe {
-    el.GetRuntimeId()
-      .map(|ids| ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(" "))
-      .unwrap_or_default()
-  }
+fn compute_runtime_id(_el: &IUIAutomationElement) -> String {
+  // GetRuntimeId returns *mut SAFEARRAY which requires SafeArrayAccessData
+  // For now, return empty string (fallback to role+name+distance matching)
+  String::new()
 }
 
 fn walk(
