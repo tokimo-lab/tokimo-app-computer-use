@@ -1321,13 +1321,16 @@ fn bfs_query_with_extra(
   let mut visited: std::collections::HashSet<usize> = std::collections::HashSet::new();
   let mut queue: VecDeque<(AXUIElement, usize, String)> = VecDeque::new();
 
-  let push =
-    |q: &mut VecDeque<(AXUIElement, usize, String)>, v: &mut std::collections::HashSet<usize>, e: AXUIElement, d: usize, path: String| {
-      let key = ax_identity_key(&e);
-      if v.insert(key) {
-        q.push_back((e, d, path));
-      }
-    };
+  let push = |q: &mut VecDeque<(AXUIElement, usize, String)>,
+              v: &mut std::collections::HashSet<usize>,
+              e: AXUIElement,
+              d: usize,
+              path: String| {
+    let key = ax_identity_key(&e);
+    if v.insert(key) {
+      q.push_back((e, d, path));
+    }
+  };
 
   push(&mut queue, &mut visited, root.clone(), 0, "0".to_string());
   for (i, e) in extra_roots.iter().enumerate() {

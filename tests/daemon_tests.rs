@@ -1,8 +1,8 @@
 //! Daemon lifecycle and IPC tests for both macOS and Windows.
 
 use std::process::Command;
-use std::time::Duration;
 use std::thread;
+use std::time::Duration;
 
 fn binary_path() -> String {
   let mut path = std::env::current_exe()
@@ -52,18 +52,17 @@ fn daemon_pid() -> Option<u32> {
 #[cfg(windows)]
 fn daemon_pid() -> Option<u32> {
   let output = Command::new("tasklist")
-    .args(["/FI", "IMAGENAME eq tokimo-app-computer-daemon.exe", "/FO", "CSV", "/NH"])
+    .args([
+      "/FI",
+      "IMAGENAME eq tokimo-app-computer-daemon.exe",
+      "/FO",
+      "CSV",
+      "/NH",
+    ])
     .output()
     .ok()?;
   let stdout = String::from_utf8_lossy(&output.stdout);
-  stdout
-    .lines()
-    .next()?
-    .split(',')
-    .nth(1)?
-    .trim_matches('"')
-    .parse()
-    .ok()
+  stdout.lines().next()?.split(',').nth(1)?.trim_matches('"').parse().ok()
 }
 
 fn is_daemon_running() -> bool {

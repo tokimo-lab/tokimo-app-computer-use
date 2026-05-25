@@ -32,9 +32,7 @@ struct RoleNameTracker {
 
 impl RoleNameTracker {
   fn new() -> Self {
-    Self {
-      counts: HashMap::new(),
-    }
+    Self { counts: HashMap::new() }
   }
 
   fn assign_nth(&mut self, role: &str, name: &str) -> Option<usize> {

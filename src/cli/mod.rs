@@ -69,8 +69,8 @@ impl IpcClient {
   fn connect(socket_path: &str) -> Result<Self> {
     use std::os::unix::net::UnixStream;
 
-    let stream = UnixStream::connect(socket_path)
-      .with_context(|| format!("cannot connect to daemon at {socket_path}"))?;
+    let stream =
+      UnixStream::connect(socket_path).with_context(|| format!("cannot connect to daemon at {socket_path}"))?;
 
     let reader_stream = stream.try_clone()?;
     let reader = BufReader::new(Box::new(reader_stream) as Box<dyn std::io::Read + Send>);
