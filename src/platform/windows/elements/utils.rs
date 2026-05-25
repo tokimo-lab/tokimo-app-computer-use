@@ -3,6 +3,7 @@
 use crate::platform::windows::elements::find::find_elements_by_handle_xpath_internal;
 use crate::platform::windows::ui_object::WindowsElement;
 use anyhow::Result;
+use windows::Win32::System::Ole::*;
 use windows::Win32::UI::Accessibility::*;
 
 pub fn find_first_element_by_xpath(hwnd: i64, xpath: &str) -> Result<WindowsElement> {
@@ -105,5 +106,49 @@ pub fn get_control_type_id_by_name(name: &str) -> Option<UIA_CONTROLTYPE_ID> {
     "semanticzoom" => Some(UIA_SemanticZoomControlTypeId),
     "appbar" => Some(UIA_AppBarControlTypeId),
     _ => None,
+  }
+}
+
+/// Compute a stable runtime ID string for a UIAutomation element.
+///
+/// `IUIAutomationElement::GetRuntimeId()` returns a `SAFEARRAY` of `i32` values
+/// that uniquely identifies the element across the desktop (stable for the
+/// lifetime of the element, even if the tree is re-queried).
+///
+/// We format the array as a colon-separated string (e.g. "42:1234:5678").
+/// On failure, returns an empty string so the caller falls back to
+/// role+name+distance matching.
+pub fn compute_runtime_id(el: &IUIAutomationElement) -> String {
+  unsafe {
+    let psa = match el.GetRuntimeId() {
+      Ok(p) if !p.is_null() => p,
+      _ => return String::new(),
+    };
+
+    let mut data: *mut core::ffi::c_void = core::ptr::null_mut();
+    if SafeArrayAccessData(psa, &mut data).is_err() {
+      let _ = SafeArrayDestroy(psa);
+      return String::new();
+    }
+
+    let lb = SafeArrayGetLBound(psa, 1).unwrap_or(0);
+    let ub = SafeArrayGetUBound(psa, 1).unwrap_or(-1);
+    let len = (ub - lb + 1).max(0) as usize;
+
+    let ids: Vec<i32> = if len > 0 && !data.is_null() {
+      let ptr = data as *const i32;
+      (0..len).map(|i| *ptr.add(i)).collect()
+    } else {
+      Vec::new()
+    };
+
+    let _ = SafeArrayUnaccessData(psa);
+    let _ = SafeArrayDestroy(psa);
+
+    if ids.is_empty() {
+      String::new()
+    } else {
+      ids.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(":")
+    }
   }
 }

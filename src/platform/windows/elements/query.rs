@@ -19,6 +19,7 @@
 
 use crate::error::Result;
 use crate::platform::Element;
+use crate::platform::windows::elements::utils::compute_runtime_id;
 use crate::platform::windows::system_info::ensure_com_initialized;
 use crate::platform::windows::ui_object::WindowsElement;
 use crate::platform::windows::wnd;
@@ -262,12 +263,6 @@ fn current_value(el: &IUIAutomationElement) -> Option<String> {
 // ────────────────────────────────────────────────────────────────────────────
 // Walk
 // ────────────────────────────────────────────────────────────────────────────
-
-fn compute_runtime_id(_el: &IUIAutomationElement) -> String {
-  // GetRuntimeId returns *mut SAFEARRAY which requires SafeArrayAccessData
-  // For now, return empty string (fallback to role+name+distance matching)
-  String::new()
-}
 
 fn walk(
   walker: &IUIAutomationTreeWalker,

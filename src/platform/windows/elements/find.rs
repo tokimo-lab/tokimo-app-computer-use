@@ -1,4 +1,4 @@
-use crate::platform::windows::elements::utils::get_control_type_id_by_name;
+use crate::platform::windows::elements::utils::{compute_runtime_id, get_control_type_id_by_name};
 use crate::platform::windows::system_info::ensure_com_initialized;
 use crate::platform::windows::ui_object::WindowsElement;
 use anyhow::Result;
@@ -11,12 +11,6 @@ pub fn find_elements_by_handle_xpath_internal(hwnd: i64, xpath: &str) -> Result<
   let hwnd = windows::Win32::Foundation::HWND(hwnd as *mut core::ffi::c_void);
   let window_element = unsafe { automation.ElementFromHandle(hwnd)? };
   parse_xpath(&automation, &window_element, xpath)
-}
-
-fn compute_runtime_id(_el: &IUIAutomationElement) -> String {
-  // GetRuntimeId returns *mut SAFEARRAY which requires SafeArrayAccessData
-  // For now, return empty string (fallback to role+name+distance matching)
-  String::new()
 }
 
 fn find_elements_with_raw_walker(

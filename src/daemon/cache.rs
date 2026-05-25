@@ -7,8 +7,6 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use anyhow::Context;
-
 use crate::error::Result;
 use crate::platform::{Element, PlatformProvider};
 use crate::types::{ElementQuery, ElementScope};
