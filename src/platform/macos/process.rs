@@ -334,21 +334,16 @@ pub fn terminate_apps_by_name(name: &str) -> Result<(u32, u32)> {
 }
 
 /// Resolve an "app" identifier (localized name / bundle id / executable name) to a PID
-/// using NSWorkspace.runningApplications. Case-insensitive contains match.
+/// using NSWorkspace.runningApplications. Scored matching via shared `match_util`.
 pub fn resolve_app_pid(name: &str) -> Result<Option<u32>> {
+  use crate::match_util::best_name_score;
   use objc2_app_kit::NSWorkspace;
-  let needle = name.to_lowercase();
   unsafe {
     let ws = NSWorkspace::sharedWorkspace();
     let apps = ws.runningApplications();
     let count = apps.count();
 
-    // Score every candidate. Higher is better.
-    //   +1000 exact localizedName / bundle / executable
-    //   +500  activationPolicy == .regular (i.e. has dock icon / UI)
-    //   +200  is currently active
-    //   +100  substring match
-    let mut scored: Vec<(i32, u32, String)> = Vec::new();
+    let mut scored: Vec<(i32, u32)> = Vec::new();
     for i in 0..count {
       let app = apps.objectAtIndex(i);
       let pid = app.processIdentifier() as u32;
@@ -359,38 +354,31 @@ pub fn resolve_app_pid(name: &str) -> Result<Option<u32>> {
         .and_then(|u| u.lastPathComponent())
         .map(|s| s.to_string())
         .unwrap_or_default();
-      let l_low = localized.to_lowercase();
-      let b_low = bundle.to_lowercase();
-      let e_low = exec.to_lowercase();
-      let mut score = 0i32;
-      if l_low == needle || b_low == needle || e_low == needle {
-        score += 1000;
-      } else if l_low.contains(&needle) || b_low.contains(&needle) || e_low.contains(&needle) {
-        score += 100;
-      } else {
+
+      let mut score = best_name_score(name, &[&localized, &bundle, &exec]);
+      if score == 0 {
         continue;
       }
-      // activationPolicy: 0 = regular (has UI), 1 = accessory, 2 = prohibited
+
+      // Platform-specific bonuses
       let policy = app.activationPolicy().0 as i32;
       if policy == 0 {
         score += 500;
       } else if policy == 2 {
-        score -= 500; // strongly disprefer background helpers
+        score -= 500;
       }
       if app.isActive() {
         score += 200;
       }
-      // Prefer apps that actually own at least one CGWindow (filters out launchers
-      // and helpers that match by name but have no UI).
       if super::window::get_windows_by_process_id(pid)
         .map(|w| !w.is_empty())
         .unwrap_or(false)
       {
         score += 300;
       }
-      scored.push((score, pid, localized));
+      scored.push((score, pid));
     }
     scored.sort_by(|a, b| b.0.cmp(&a.0));
-    Ok(scored.into_iter().next().map(|(_, pid, _)| pid))
+    Ok(scored.into_iter().next().map(|(_, pid)| pid))
   }
 }

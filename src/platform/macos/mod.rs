@@ -132,13 +132,16 @@ impl WindowManager for MacPlatform {
     window::find_windows_by_title(pattern, process_name)
   }
   fn find_windows_by_process(&self, pattern: &str) -> Result<Vec<WindowInfo>> {
-    let pat = pattern.to_lowercase();
-    Ok(
-      window::list_windows()?
-        .into_iter()
-        .filter(|w| w.process_name.to_lowercase().contains(&pat))
-        .collect(),
-    )
+    use crate::match_util::best_name_score;
+    let mut scored: Vec<(i32, WindowInfo)> = window::list_windows()?
+      .into_iter()
+      .filter_map(|w| {
+        let s = best_name_score(pattern, &[&w.process_name, &w.title]);
+        if s > 0 { Some((s, w)) } else { None }
+      })
+      .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    Ok(scored.into_iter().map(|(_, w)| w).collect())
   }
   fn get_windows_by_process_id(&self, pid: u32) -> Result<Vec<WindowInfo>> {
     window::get_windows_by_process_id(pid)

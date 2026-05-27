@@ -3,6 +3,7 @@
 pub mod cli;
 pub mod daemon;
 pub mod error;
+pub mod match_util;
 pub mod platform;
 pub mod types;
 

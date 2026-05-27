@@ -555,11 +555,9 @@ fn parse_scope<P: PlatformProvider + ?Sized>(
     return Ok(ElementScope::Window(WindowHandle(h)));
   }
   if let Some(name) = params["app"].as_str() {
-    // Resolve via running-applications first (more reliable than SCShareableContent).
     if let Some(pid) = platform.resolve_app_pid(name)? {
       return Ok(ElementScope::Application(pid));
     }
-    // Fallback to window-based lookup
     let wins = platform.find_windows_by_process(name)?;
     let w = wins
       .into_iter()

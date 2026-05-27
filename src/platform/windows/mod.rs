@@ -164,19 +164,18 @@ impl WindowManager for WindowsPlatform {
     )
   }
   fn find_windows_by_process(&self, pattern: &str) -> Result<Vec<WindowInfo>> {
+    use crate::match_util::best_name_score;
     let all = wnd::fetch_all_windows()?;
-    let pat = pattern.to_lowercase();
-    Ok(
-      all
-        .into_iter()
-        .filter(|w| {
-          if wnd::is_system_window(&w.title, &w.process_name) {
-            return false;
-          }
-          w.process_name.to_lowercase().contains(&pat)
-        })
-        .collect(),
-    )
+    let mut scored: Vec<(i32, WindowInfo)> = all
+      .into_iter()
+      .filter(|w| !wnd::is_system_window(&w.title, &w.process_name))
+      .filter_map(|w| {
+        let s = best_name_score(pattern, &[&w.process_name, &w.title]);
+        if s > 0 { Some((s, w)) } else { None }
+      })
+      .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    Ok(scored.into_iter().map(|(_, w)| w).collect())
   }
   fn get_windows_by_process_id(&self, pid: u32) -> Result<Vec<WindowInfo>> {
     wnd::get_all_windows_by_process_id_internal(pid)
@@ -343,7 +342,7 @@ impl ProcessManager for WindowsPlatform {
     process::get_process_info(pid)
   }
   fn resolve_app_pid(&self, name: &str) -> Result<Option<u32>> {
-    Ok(process::get_processes_by_name(name)?.into_iter().next())
+    process::resolve_app_pid(name)
   }
 }
 

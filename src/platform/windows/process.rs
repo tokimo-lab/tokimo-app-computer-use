@@ -70,6 +70,39 @@ pub fn get_processes_by_name(name: &str) -> Result<Vec<u32>> {
   Ok(pids)
 }
 
+/// Resolve an app name to the best-matching PID using scored matching.
+/// Considers both the exe name (with and without .exe suffix) and the
+/// window title of each process.
+pub fn resolve_app_pid(name: &str) -> Result<Option<u32>> {
+  use crate::match_util::best_name_score;
+  use windows::Win32::System::Diagnostics::ToolHelp::*;
+
+  let mut scored: Vec<(i32, u32)> = Vec::new();
+  unsafe {
+    let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).context("CreateToolhelp32Snapshot")?;
+    let mut entry = PROCESSENTRY32W {
+      dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+      ..Default::default()
+    };
+    if Process32FirstW(snapshot, &mut entry).is_ok() {
+      loop {
+        let exe = String::from_utf16_lossy(&entry.szExeFile).trim_end_matches('\0').to_string();
+        let stem = exe.strip_suffix(".exe").unwrap_or(&exe);
+        let s = best_name_score(name, &[&exe, stem]);
+        if s > 0 {
+          scored.push((s, entry.th32ProcessID));
+        }
+        if Process32NextW(snapshot, &mut entry).is_err() {
+          break;
+        }
+      }
+    }
+    let _ = CloseHandle(snapshot);
+  }
+  scored.sort_by(|a, b| b.0.cmp(&a.0));
+  Ok(scored.into_iter().next().map(|(_, pid)| pid))
+}
+
 pub fn launch_application_and_get_process_id(app_path: &str, wait_timeout_ms: u32) -> Result<u32> {
   let before = get_processes_by_name(&extract_process_name(app_path))?;
   // Also snapshot all PIDs that already have windows, so we can detect
