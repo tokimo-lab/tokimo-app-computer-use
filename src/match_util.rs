@@ -67,7 +67,11 @@ fn is_subsequence(needle: &str, haystack: &str) -> bool {
 
 /// Best string-match score across multiple candidate fields.
 pub fn best_name_score(needle: &str, candidates: &[&str]) -> i32 {
-  candidates.iter().map(|c| name_match_score(needle, c)).max().unwrap_or(0)
+  candidates
+    .iter()
+    .map(|c| name_match_score(needle, c))
+    .max()
+    .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -136,9 +140,15 @@ mod tests {
   #[test]
   fn docker_prefix() {
     // "Docker Desktop.exe" stem = "Docker Desktop"
-    assert_eq!(best_name_score("docker", &["Docker Desktop.exe", "Docker Desktop"]), 800);
+    assert_eq!(
+      best_name_score("docker", &["Docker Desktop.exe", "Docker Desktop"]),
+      800
+    );
     // com.docker.backend → substring
-    assert_eq!(best_name_score("docker", &["com.docker.backend.exe", "com.docker.backend"]), 100);
+    assert_eq!(
+      best_name_score("docker", &["com.docker.backend.exe", "com.docker.backend"]),
+      100
+    );
   }
 
   #[test]
@@ -167,12 +177,18 @@ mod tests {
   #[test]
   fn terminal_substring() {
     // "terminal" is substring of "WindowsTerminal"
-    assert_eq!(best_name_score("terminal", &["WindowsTerminal.exe", "WindowsTerminal"]), 100);
+    assert_eq!(
+      best_name_score("terminal", &["WindowsTerminal.exe", "WindowsTerminal"]),
+      100
+    );
   }
 
   #[test]
   fn nvidia_prefix() {
-    assert_eq!(best_name_score("nvidia", &["NVIDIA Overlay.exe", "NVIDIA Overlay"]), 800);
+    assert_eq!(
+      best_name_score("nvidia", &["NVIDIA Overlay.exe", "NVIDIA Overlay"]),
+      800
+    );
   }
 
   #[test]

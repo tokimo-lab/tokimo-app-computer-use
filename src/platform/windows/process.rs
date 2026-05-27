@@ -86,7 +86,9 @@ pub fn resolve_app_pid(name: &str) -> Result<Option<u32>> {
     };
     if Process32FirstW(snapshot, &mut entry).is_ok() {
       loop {
-        let exe = String::from_utf16_lossy(&entry.szExeFile).trim_end_matches('\0').to_string();
+        let exe = String::from_utf16_lossy(&entry.szExeFile)
+          .trim_end_matches('\0')
+          .to_string();
         let stem = exe.strip_suffix(".exe").unwrap_or(&exe);
         let s = best_name_score(name, &[&exe, stem]);
         if s > 0 {
